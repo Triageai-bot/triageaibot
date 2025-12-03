@@ -30,11 +30,12 @@ jobs:
 
           cd triageaibot
 
-          # Extract NEW_TOKEN from config.py
+          # Extract NEW_TOKEN and WHATSAPP_PHONE_ID from config.py
           TOKEN=$(grep NEW_TOKEN config.py | cut -d '=' -f2 | tr -d '"')
+          PHONE_ID=$(grep WHATSAPP_PHONE_ID config.py | cut -d '=' -f2 | tr -d '"')
 
           # Make script executable
           sudo chmod +x edit_and_reload.sh
 
-          # Run token update
-          sudo ./edit_and_reload.sh "$TOKEN"
+          # Run update with BOTH parameters
+          sudo ./edit_and_reload.sh "$TOKEN" "$PHONE_ID"
