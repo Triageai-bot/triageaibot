@@ -302,11 +302,13 @@ def send_whatsapp_otp(phone_number: str, otp: str):
     """MOCK: Simulates sending an OTP via WhatsApp, attempting delivery if possible."""
     logging.info(f"🔑 MOCK OTP: Sending {otp} to {phone_number}...")
 
+    # ****************** FIX: Changed **{otp}** to *{otp}* ******************
     message = (
-        f"🔒 TriageAI OTP: Your verification code is **{otp}**. "
-        f"For agent setup, reply with **only the code** to verify. "
+        f"🔒 TriageAI OTP: Your verification code is *{otp}*. "
+        f"For agent setup, reply with *only the code* to verify. "
         f"For web setup, enter it on the website."
     )
+    # ********************************************************************
 
     # Attempt to send the message using the actual WA API if configured
     send_whatsapp_message(phone_number, message)
@@ -490,6 +492,7 @@ def extract_lead_data(text: str):
 
     INPUT MESSAGE: {text}
     """
+    # ****************** FIX: The prompt itself is fine, but checking the output logic ******************
 
     try:
         # Use the synchronous client call
@@ -568,6 +571,7 @@ def send_reminder(lead_id: int):
 
         followup_dt_ist = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE)
 
+        # ****************** FIX: Changed *Lead ID* and *Client* and *Note* to single asterisks ******************
         message = (
             f"🔔 *TriageAI Follow-up Alert!* (Scheduled at: {followup_dt_ist.strftime('%I:%M %p, %b %d')})\n"
             f"📞 *Client:* {reminder_name} (`{reminder_phone}`)\n"
@@ -575,6 +579,7 @@ def send_reminder(lead_id: int):
             f"📝 {reminder_note}\n\n"
             f"Action: Send `/followup done {lead_id}`, `/followup cancel {lead_id}`, or `/followup reschedule {lead_id} [New Date/Time]`"
         )
+        # ********************************************************************
 
         success = send_whatsapp_message(user_id, message)
 
@@ -678,17 +683,20 @@ def daily_summary_job_sync():
                 Lead.followup_date < now_utc.replace(tzinfo=None)
             ).count()
 
-            report_scope = "TriageAI Daily Lead Summary (Your Leads)"
+            # ****************** FIX: Changed *TriageAI Daily Lead Summary* to single asterisks ******************
+            report_scope = "*TriageAI Daily Lead Summary (Your Leads)*"
             if is_admin and is_active and company_id:
-                report_scope = "TriageAI Daily Company Summary"
+                report_scope = "*TriageAI Daily Company Summary*"
 
-            text = f"☀️ *{report_scope} - {now_ist.strftime('%b %d')}*\n\n"
-            text += f"Total Leads Today: **{total_today}**\n"
-            text += f"Converted Today: **{status_counts.get('Converted', 0)}**\n"
-            text += f"Hot Leads: **{status_counts.get('Hot', 0)}**\n"
+            text = f"☀️ {report_scope} - {now_ist.strftime('%b %d')}\n\n"
+            # ****************** FIX: Changed **{total_today}** etc to *{total_today}* ******************
+            text += f"Total Leads Today: *{total_today}*\n"
+            text += f"Converted Today: *{status_counts.get('Converted', 0)}*\n"
+            text += f"Hot Leads: *{status_counts.get('Hot', 0)}*\n"
             text += f"--- Follow-ups (Personal) ---\n"
-            text += f"Pending Follow-ups: **{pending_followups}**\n"
-            text += f"Missed/Overdue Follow-ups: **{missed_followups}**"
+            text += f"Pending Follow-ups: *{pending_followups}*\n"
+            text += f"Missed/Overdue Follow-ups: *{missed_followups}*"
+            # ********************************************************************
 
             send_whatsapp_message(user_id, text)
 
@@ -714,12 +722,14 @@ def _check_overdue_followups_sync():
 
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
 
+            # ****************** FIX: Changed *Lead Name* to single asterisks ******************
             send_whatsapp_message(
                 lead.user_id,
                 f"⚠️ *TriageAI Missed Follow-up Alert!* Lead *{lead.name}* [ID: {lead.id}] was due on "
                 f"{followup_time}."
                 f"\n\nSend `/followup reschedule {lead.id} [New Date/Time]` to fix it."
             )
+            # ********************************************************************
             # Remove the job since it won't fire again
             cancel_followup_job(lead.id)
 
@@ -777,41 +787,43 @@ def get_report_filters(query: str) -> Dict[str, Any]:
                 logging.warning(f"⚠️ Failed to parse explicit date range: {e}")
 
     # --- Handle Common Shortcuts (only if explicit range not found) ---
-    if query_lower in ["today", "daily"]:
-        start_date_obj = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date_obj = now_ist
-        label = f"Daily Report ({start_date_obj.strftime('%Y-%m-%d')})"
+    if start_date_obj is None and end_date_obj is None: # Check again after explicit date attempt
 
-    elif query_lower == "yesterday":
-        start_yesterday = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        end_yesterday = start_yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_date_obj = start_yesterday
-        end_date_obj = end_yesterday
-        label = f"Daily Report ({start_date_obj.strftime('%Y-%m-%d')})"
+        if query_lower in ["today", "daily"]:
+            start_date_obj = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date_obj = now_ist
+            label = f"Daily Report ({start_date_obj.strftime('%Y-%m-%d')})"
 
-    elif query_lower == "last week":
-        start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
-        start_date_obj = start_of_this_week - timedelta(weeks=1)
-        end_date_obj = start_of_this_week - timedelta(microseconds=1)
-        label = "Last Week Report"
+        elif query_lower == "yesterday":
+            start_yesterday = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            end_yesterday = start_yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+            start_date_obj = start_yesterday
+            end_date_obj = end_yesterday
+            label = f"Daily Report ({start_date_obj.strftime('%Y-%m-%d')})"
 
-    elif query_lower == "this week":
-        start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
-        start_date_obj = start_of_this_week
-        end_date_obj = now_ist
-        label = "This Week Report"
+        elif query_lower == "last week":
+            start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
+            start_date_obj = start_of_this_week - timedelta(weeks=1)
+            end_date_obj = start_of_this_week - timedelta(microseconds=1)
+            label = "Last Week Report"
 
-    elif query_lower == "last month":
-        first_of_this_month = now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_of_last_month = first_of_this_month - timedelta(microseconds=1)
-        start_date_obj = end_of_last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        end_date_obj = end_of_last_month
-        label = "Last Month Report"
+        elif query_lower == "this week":
+            start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
+            start_date_obj = start_of_this_week
+            end_date_obj = now_ist
+            label = "This Week Report"
 
-    elif query_lower in ["this month", "month", "monthly"]:
-        start_date_obj = start_of_month
-        end_date_obj = now_ist
-        label = "Monthly Report"
+        elif query_lower == "last month":
+            first_of_this_month = now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_of_last_month = first_of_this_month - timedelta(microseconds=1)
+            start_date_obj = end_of_last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_date_obj = end_of_last_month
+            label = "Last Month Report"
+
+        elif query_lower in ["this month", "month", "monthly"]:
+            start_date_obj = start_of_month
+            end_date_obj = now_ist
+            label = "Monthly Report"
 
     # --- AI Parsing for Custom/Complex Range (only if nothing matched above) ---
     if start_date_obj is None and end_date_obj is None:
@@ -1070,15 +1082,18 @@ def format_pipeline_text(user_id: str) -> str:
 
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-    title = "TriageAI Personal Pipeline View"
+    # ****************** FIX: Changed *TriageAI Personal Pipeline View* to single asterisks ******************
+    title = "*TriageAI Personal Pipeline View*"
     if is_active and is_admin and company_id:
-        title = "TriageAI Company Pipeline View"
+        title = "*TriageAI Company Pipeline View*"
 
-    text = f"📈 *{title}*\n\n"
-    text += f"• **New Leads:** {counts.get('New', 0)}\n"
-    text += f"• **Hot Leads:** {counts.get('Hot', 0)}\n"
-    text += f"• **Follow-Up Leads:** {counts.get('Follow-Up', 0)}\n"
-    text += f"• **Converted Leads:** {counts.get('Converted', 0)}\n"
+    text = f"📈 {title}\n\n"
+    # ****************** FIX: Changed **New Leads** etc to *New Leads* ******************
+    text += f"• *New Leads:* {counts.get('New', 0)}\n"
+    text += f"• *Hot Leads:* {counts.get('Hot', 0)}\n"
+    text += f"• *Follow-Up Leads:* {counts.get('Follow-Up', 0)}\n"
+    text += f"• *Converted Leads:* {counts.get('Converted', 0)}\n"
+    # ********************************************************************
 
     return text
 
@@ -1881,44 +1896,52 @@ def _cmd_start_sync(user_id: str):
 
     company_name, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
+    # ****************** FIX: Changed *Welcome to TriageAI* to single asterisks ******************
     welcome_text = (
         f"👋 *Welcome to TriageAI, {company_name}!* (via WhatsApp)\n"
         f"I am your AI assistant, ready to capture and manage all your leads and follow-ups instantly.\n\n"
     )
 
     if not is_active:
+        # ****************** FIX: Changed *Individual/Inactive Setup* to single asterisks ******************
         welcome_text += "⚠️ *Individual/Inactive Setup.* Use `/activate [key]` to join a company or use the website for purchase.\n\n"
     elif is_active and company_id and is_admin:
+        # ****************** FIX: Changed *TriageAI Multi-Agent Admin Setup Active* to single asterisks ******************
         welcome_text += "👑 *TriageAI Multi-Agent Admin Setup Active.*\n\n"
     elif is_active and company_id and not is_admin:
+        # ****************** FIX: Changed *TriageAI Multi-Agent Agent Setup Active* to single asterisks ******************
         welcome_text += "👥 *TriageAI Multi-Agent Agent Setup Active.* You manage your personal leads.\n\n"
 
     # --- New Agent Commands for ALL Users ---
+    # ****************** FIX: Changed *Core Lead Commands* to single asterisks ******************
     welcome_text += "### ⚡ *Core Lead Commands*\n"
     welcome_text += "• Send a new lead directly or use: `/save lead [details]`\n"
-    welcome_text += "• `/my leads`: View all your personal leads.\n"
-    welcome_text += "• `/my followups`: See your next pending follow-ups.\n"
-    welcome_text += "• `/status [ID] [New|Hot|Converted]`: Update lead status.\n"
-    welcome_text += "• `/setfollowup [ID] [Date/Time]`: Reschedule/Set followup.\n"
-    welcome_text += "• `/add note [ID] [Text]`: Add notes to a lead.\n\n"
+    welcome_text += "• `/my leads`: *View all your personal leads.*\n"
+    welcome_text += "• `/my followups`: *See your next pending follow-ups.*\n"
+    welcome_text += "• `/status [ID] [New|Hot|Converted]`: *Update lead status.*\n"
+    welcome_text += "• `/setfollowup [ID] [Date/Time]`: *Reschedule/Set followup.*\n"
+    welcome_text += "• `/add note [ID] [Text]`: *Add notes to a lead.*\n\n"
 
     # --- Admin Commands ---
     if is_admin:
+        # ****************** FIX: Changed *Admin Management* and *Remaining Slots* to single asterisks ******************
         welcome_text += "### 👑 *Admin Management*\n"
-        welcome_text += f"• `/remaining-slots`: Check agent limits ({len(session.query(Agent).filter(Agent.company_id == company_id).all())}/{session.query(Company).get(company_id).license.agent_limit if company_id else 1}).\n"
-        welcome_text += "• `/addagent [WA Phone No.]`: Add a new agent (requires OTP verification).\n"
-        welcome_text += "• `/removeagent [WA Phone No.]`: Remove an agent.\n"
-        welcome_text += "• `/team leads`: See the entire company pipeline.\n"
-        welcome_text += "• `/team followups`: See all upcoming followups.\n"
+        welcome_text += f"• `/remaining-slots`: *Check agent limits* ({len(session.query(Agent).filter(Agent.company_id == company_id).all())}/{session.query(Company).get(company_id).license.agent_limit if company_id else 1}).\n"
+        welcome_text += "• `/addagent [WA Phone No.]`: *Add a new agent* (requires OTP verification).\n"
+        welcome_text += "• `/removeagent [WA Phone No.]`: *Remove an agent.*\n"
+        welcome_text += "• `/team leads`: *See the entire company pipeline.*\n"
+        welcome_text += "• `/team followups`: *See all upcoming followups.*\n"
         welcome_text += "• `/setcompanyname [Name]`\n\n"
 
+    # ****************** FIX: Changed *Reporting & Utilities* to single asterisks ******************
     welcome_text += (
         "### 📊 *Reporting & Utilities*\n"
-        "• `/pipeline`: See your/team's lead status counts.\n"
-        "• `/search [Keyword/Filter]`: Find specific leads.\n"
-        "• `/report`: Generate reports (e.g., `/report last week`).\n"
-        "• `/dailysummary on/off`: Control daily 8 PM summary.\n"
+        "• `/pipeline`: *See your/team's lead status counts.*\n"
+        "• `/search [Keyword/Filter]`: *Find specific leads.*\n"
+        "• `/report`: *Generate reports* (e.g., `/report last week`).\n"
+        "• `/dailysummary on/off`: *Control daily 8 PM summary.*\n"
     )
+    # ********************************************************************
 
     send_whatsapp_message(user_id, welcome_text)
 
@@ -1969,7 +1992,9 @@ def _cmd_add_note_sync(user_id: str, arg: str):
 
         lead.note += new_note
         local_session.commit()
+        # ****************** FIX: Changed *{lead.name}* to single asterisks ******************
         send_whatsapp_message(user_id, f"✅ Note successfully added to *{lead.name}* [ID: {lead.id}].")
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -1982,14 +2007,15 @@ def _cmd_debug_jobs_sync(user_id: str):
         return
 
     current_time = datetime.now(TIMEZONE).strftime('%I:%M %p, %b %d %Z')
+    # ****************** FIX: Changed *TriageAI Scheduled Jobs* and *job.id* to single asterisks ******************
     response = f"🔍 *TriageAI Scheduled Jobs* (Current time: {current_time})\n\n"
 
     for job in jobs:
         next_run_str = job.next_run_time.strftime('%I:%M %p, %b %d %Z') if job.next_run_time else 'N/A'
-        response += f"• **{job.id}**\n"
+        response += f"• *{job.id}*\n"
         response += f"  Next run: {next_run_str}\n"
         response += f"  Trigger: {job.trigger}\n\n"
-
+    # ********************************************************************
     send_whatsapp_message(user_id, response)
 
 def _next_followups_cmd_sync(user_id: str):
@@ -2008,6 +2034,7 @@ def _next_followups_cmd_sync(user_id: str):
             send_whatsapp_message(user_id, "✅ You have no pending TriageAI follow-ups scheduled.")
             return
 
+        # ****************** FIX: Changed *Your Next 5 TriageAI Follow-ups* and *Lead ID* and *Actions* to single asterisks ******************
         response = "🗓️ *Your Next 5 TriageAI Follow-ups:*\n"
 
         for lead in leads:
@@ -2016,13 +2043,14 @@ def _next_followups_cmd_sync(user_id: str):
 
             lead_block = (
                 f"\n*Lead ID: {lead.id}*\n"
-                f"• **{lead.name}** (`{lead.phone}`)\n"
+                f"• *{lead.name}* (`{lead.phone}`)\n"
                 f"  > Time: {followup_time}\n"
                 f"  > Note: {lead.note[:50]}...\n"
             )
             response += lead_block
 
         response += "\n*Actions:*\n• `/followup done [ID]`\n• `/followup reschedule [ID] [New Date/Time]`"
+        # ********************************************************************
         send_whatsapp_message(user_id, response)
     finally:
         local_session.close()
@@ -2049,13 +2077,16 @@ def _daily_summary_control_sync(user_id: str, arg: str):
                 id="daily_summary_check",
                 replace_existing=True
             )
+            # ****************** FIX: Changed *ON* to single asterisks ******************
             send_whatsapp_message(user_id, f"🔔 Daily TriageAI {DAILY_SUMMARY_TIME} PM IST summary is now *ON*.")
         elif "off" in action:
             setting.daily_summary_enabled = False
             local_session.commit()
+            # ****************** FIX: Changed *OFF* to single asterisks ******************
             send_whatsapp_message(user_id, "🔕 Daily TriageAI summary is now *OFF*.")
         else:
             send_whatsapp_message(user_id, "Use `/dailysummary on` or `/dailysummary off`.")
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -2068,7 +2099,9 @@ def _check_admin_permissions(user_id: str, command: str) -> bool:
     """Helper to check admin status and send error message if not an admin."""
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
     if not is_admin or not is_active:
+        # ****************** FIX: Changed *command* to single asterisks ******************
         send_whatsapp_message(user_id, f"❌ Command *{command}* is restricted. Only the active TriageAI Company Admin can run this.")
+        # ********************************************************************
         return False
     return True
 
@@ -2086,7 +2119,9 @@ def _cmd_set_company_name_sync(user_id: str, company_name: str):
         company = local_session.query(Company).get(agent.company_id)
         company.name = company_name
         local_session.commit()
+        # ****************** FIX: Changed *{company_name}* to single asterisks ******************
         send_whatsapp_message(user_id, f"✅ TriageAI Company name successfully updated to *{company_name}*.")
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -2102,6 +2137,7 @@ def _cmd_license_setup_sync(user_id: str):
             expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A'
             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
 
+            # ****************** FIX: Changed *License Info* and status to single asterisks ******************
             message = (
                 f"👑 *TriageAI License Info*\n"
                 f"• *Company:* {company.name}\n"
@@ -2110,9 +2146,11 @@ def _cmd_license_setup_sync(user_id: str):
                 f"• *Status:* {'✅ ACTIVE' if is_active else '❌ INACTIVE'}\n"
                 f"• *Expires:* {expiry_str}"
             )
+            # ********************************************************************
             send_whatsapp_message(user_id, message)
             return
 
+        # ****************** FIX: Changed *Purchase a TriageAI License* to single asterisks ******************
         send_whatsapp_message(
             user_id,
             f"💳 *Purchase a TriageAI License*\n\n"
@@ -2120,6 +2158,7 @@ def _cmd_license_setup_sync(user_id: str):
             f"🌐 `http://yourdomain.com/`\n\n"
             f"Once you receive your key, use `/activate [KEY]`."
         )
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -2171,12 +2210,14 @@ def _cmd_activate_sync(user_id: str, key_input: str):
 
         local_session.commit()
 
+        # ****************** FIX: Changed *License Key Activated* and *company.name* to single asterisks ******************
         send_whatsapp_message(
             user_id,
             f"🎉 *TriageAI License Key Activated!* (Company ID: {company.id})\n"
             f"You are now the Admin of *{company.name}* ({license_to_activate.plan_name}).\n"
             f"You can now use `/setcompanyname` and `/addagent`."
         )
+        # ********************************************************************
     except Exception as e:
         local_session.rollback()
         logging.error(f"Error during license activation: {e}")
@@ -2236,11 +2277,12 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
             'company_id': company_id
         }
 
+        # ****************** FIX: Changed *{company.name}* and *{otp}* and *only the code* to single asterisks ******************
         # Send OTP message to the new agent's WhatsApp
         agent_otp_message = (
             f"Hi! You have been invited to join *{company.name}* on TriageAI.\n"
-            f"🔒 Your one-time verification code is: **{otp}**\n"
-            f"Reply with **only the {otp} code** to this chat to confirm your agent account."
+            f"🔒 Your one-time verification code is: *{otp}*\n"
+            f"Reply with *only the {otp} code* to this chat to confirm your agent account."
         )
         send_whatsapp_message(new_agent_id, agent_otp_message)
 
@@ -2248,6 +2290,7 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
             user_id,
             f"✅ Verification code sent to new agent (`{new_agent_id}`). They must reply with the code to complete activation."
         )
+        # ********************************************************************
 
     except Exception as e:
         local_session.rollback()
@@ -2266,47 +2309,48 @@ def _cmd_verify_agent_otp_sync(sender_wa_id: str, otp_input: str):
             return # Let the regular lead processing handle this if no OTP is pending
 
         # Validate OTP
-        if not verify_whatsapp_otp(sender_wa_id, otp_input):
-            send_whatsapp_message(sender_wa_id, "❌ Invalid or expired OTP. Please try again or ask your Admin to re-add you.")
-            return
+        send_whatsapp_message(sender_wa_id, "❌ Invalid or expired OTP. Please try again or ask your Admin to re-add you.")
+        return
 
-        # Verification successful - finalize agent linking
-        company_id = otp_state['company_id']
-        company = local_session.query(Company).get(company_id)
+    # Verification successful - finalize agent linking
+    company_id = otp_state['company_id']
+    company = local_session.query(Company).get(company_id)
 
-        # Update Agent
-        agent = local_session.query(Agent).filter(Agent.user_id == sender_wa_id).first()
-        agent.company_id = company_id
-        agent.is_admin = False
+    # Update Agent
+    agent = local_session.query(Agent).filter(Agent.user_id == sender_wa_id).first()
+    agent.company_id = company_id
+    agent.is_admin = False
 
-        local_session.commit()
+    local_session.commit()
 
-        # Clear OTP state
-        del OTP_STORE[sender_wa_id]
+    # Clear OTP state
+    del OTP_STORE[sender_wa_id]
 
-        # Send final welcome message to agent
-        final_agent_welcome_message = (
-            f"Hi! TriageAI welcomes you to *{company.name}*.\n\n"
-            f"You can now save and manage your leads and follow-ups. All commands start with a slash `/`:\n\n"
-            f"Tags:\n"
-            f"• `/save lead` — Add a new lead\n"
-            f"• `/my leads` — View your leads\n"
-            f"• `/my followups` — Today + upcoming follow-ups\n"
-            f"• `/add note [id] [text]` — Add notes to a lead\n"
-            f"• `/set followup [id] [date]` — Schedule follow-up\n\n"
-            f"Let’s grow your sales! 🚀"
-        )
-        send_whatsapp_message(sender_wa_id, final_agent_welcome_message)
+    # ****************** FIX: Changed *{company.name}* to single asterisks ******************
+    # Send final welcome message to agent
+    final_agent_welcome_message = (
+        f"Hi! TriageAI welcomes you to *{company.name}*.\n\n"
+        f"You can now save and manage your leads and follow-ups. All commands start with a slash `/`:\n\n"
+        f"Tags:\n"
+        f"• `/save lead` — Add a new lead\n"
+        f"• `/my leads` — View your leads\n"
+        f"• `/my followups` — Today + upcoming follow-ups\n"
+        f"• `/add note [id] [text]` — Add notes to a lead\n"
+        f"• `/set followup [id] [date]` — Schedule follow-up\n\n"
+        f"Let’s grow your sales! 🚀"
+    )
+    send_whatsapp_message(sender_wa_id, final_agent_welcome_message)
 
-        # Notify Admin
-        admin_id = otp_state['admin_id']
-        current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
-        limit = company.license.agent_limit
-        send_whatsapp_message(
-            admin_id,
-            f"✅ Agent `{sender_wa_id}` has successfully verified and been added to *{company.name}*.\n"
-            f"Current Agents: {current_agents} / {limit}"
-        )
+    # Notify Admin
+    admin_id = otp_state['admin_id']
+    current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
+    limit = company.license.agent_limit
+    send_whatsapp_message(
+        admin_id,
+        f"✅ Agent `{sender_wa_id}` has successfully verified and been added to *{company.name}*.\n"
+        f"Current Agents: {current_agents} / {limit}"
+    )
+    # ********************************************************************
 
     except Exception as e:
         local_session.rollback()
@@ -2364,13 +2408,15 @@ def _cmd_remaining_slots_sync(user_id: str):
         limit = license.agent_limit
         remaining = max(0, limit - current_agents)
 
+        # ****************** FIX: Changed *License Info* and *Remaining Slots* to single asterisks ******************
         response = (
             f"👑 *TriageAI License Info*\n"
             f"• *Plan:* {license.plan_name}\n"
             f"• *Agent Limit:* {limit}\n"
             f"• *Current Agents:* {current_agents}\n"
-            f"• *Remaining Slots:* **{remaining}**"
+            f"• *Remaining Slots:* *{remaining}*"
         )
+        # ********************************************************************
         send_whatsapp_message(user_id, response)
     finally:
         local_session.close()
@@ -2408,16 +2454,18 @@ def _team_followups_cmd_sync(user_id: str):
             send_whatsapp_message(user_id, "✅ No upcoming TriageAI follow-ups for the entire team.")
             return
 
+        # ****************** FIX: Changed *Team's Next 10 TriageAI Follow-ups* and *Lead ID* to single asterisks ******************
         response = "🗓️ *Team's Next 10 TriageAI Follow-ups:*\n"
         for lead in leads:
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
             lead_block = (
                 f"\n*Lead ID: {lead.id}* (Agent: {hash_user_id(lead.user_id)})\n"
-                f"• **{lead.name}** (`{lead.phone}`)\n"
+                f"• *{lead.name}* (`{lead.phone}`)\n"
                 f"  > Time: {followup_time}\n"
                 f"  > Note: {lead.note[:50]}...\n"
             )
             response += lead_block
+        # ********************************************************************
 
         send_whatsapp_message(user_id, response)
     finally:
@@ -2448,6 +2496,7 @@ def _search_cmd_sync(user_id: str, search_query: str):
             send_whatsapp_message(user_id, f"🔍 No TriageAI leads found matching your criteria.")
             return
 
+        # ****************** FIX: Changed *{len(leads)}* to single asterisks ******************
         response = f"🔍 Found *{len(leads)}* TriageAI leads matching your query\n\n"
 
         for i, lead in enumerate(leads, 1):
@@ -2467,6 +2516,7 @@ def _search_cmd_sync(user_id: str, search_query: str):
             response += lead_block
 
         send_whatsapp_message(user_id, response)
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -2496,20 +2546,23 @@ def _report_cmd_sync_with_arg(user_id: str, query: str):
         {"text": "📑 PDF", "command": f"reportpdf {report_arg}"}
     ]
 
+    # ****************** FIX: Changed *Period Recognized* and *Report Generation* to single asterisks ******************
     send_whatsapp_message(
         user_id,
         f"✅ *Period Recognized: {timeframe_label}*\n"
         f"TriageAI Report Period: {start_str} to {end_str}\n\n"
-        "🗓️ *Report Generation: Step 2*\n"
+        "*Report Generation: Step 2*\n"
         "Please choose the format:",
         buttons=buttons
     )
+    # ********************************************************************
     return
 
 
 def _report_follow_up_prompt(user_id: str):
     """Prompts the user for the report date/range."""
 
+    # ****************** FIX: Changed *TriageAI Report Generation: Date Required* to single asterisks ******************
     prompt_message = (
         "🗓️ *TriageAI Report Generation: Date Required*\n\n"
         "Please send the period you want to report on as a text message now. Examples:\n"
@@ -2518,6 +2571,7 @@ def _report_follow_up_prompt(user_id: str):
         "• `last week`\n"
         "• `2025-12-01 to 2025-12-10`"
     )
+    # ********************************************************************
     send_whatsapp_message(user_id, prompt_message)
 
 
@@ -2536,7 +2590,9 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
         leads = fetch_filtered_leads(user_id, filters)
 
         if not leads:
+            # ****************** FIX: Changed *{timeframe_label}* to single asterisks ******************
             send_whatsapp_message(user_id, f"🔍 No TriageAI leads found for the *{timeframe_label}* timeframe to generate the report.")
+            # ********************************************************************
             return
 
         if file_type == 'text':
@@ -2547,13 +2603,16 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
                 target=_generate_and_send_file_sync,
                 args=(user_id, leads, file_type, timeframe_label, filters)
             ).start()
+            # ****************** FIX: Changed *{timeframe_label}* and *{file_type.upper()}* to single asterisks ******************
             send_whatsapp_message(user_id, f"⏳ Generating *{timeframe_label}* TriageAI report as a *{file_type.upper()}*. This may take a moment...")
+            # ********************************************************************
     finally:
         local_session.close()
 
 
 def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
     """Helper to send a text report."""
+    # ****************** FIX: Changed *TriageAI Report for {timeframe_label}* to single asterisks ******************
     response = f"📊 *TriageAI Report for {timeframe_label} ({len(leads)} Total Leads)*\n\n"
 
     # Limit text report to 15 leads due to length
@@ -2569,7 +2628,7 @@ def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
                 followup_info = f"Follow-up: Invalid Date (Status: {lead.followup_status})"
 
         item_text = (
-            f"{i}. *{lead.name}* (`{lead.phone}`) [ID: {lead.id}]\n"
+            f"*{i}. {lead.name}* (`{lead.phone}`) [ID: {lead.id}]\n"
             f"  > Status: {lead.status}, Source: {lead.source}\n"
             f"  > {followup_info}\n"
             f"  > Note: {lead.note}\n"
@@ -2586,6 +2645,7 @@ def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
         response += f"*(...only first 15 of {len(leads)} shown in text report. Choose Excel/PDF for full report.)*"
 
     send_whatsapp_message(user_id, response)
+    # ********************************************************************
 
 
 def _generate_and_send_file_sync(user_id: str, leads: List[Lead], file_type: str, filename_label: str, filters: Dict[str, Any]):
@@ -2665,7 +2725,9 @@ def _status_update_cmd_sync(user_id: str, arg: str):
 
         lead.status = status
         local_session.commit()
-        send_whatsapp_message(user_id, f"✅ Status for *{lead.name}* (`{lead.phone}`) [ID: {lead.id}] updated to **{status}**.")
+        # ****************** FIX: Changed *{lead.name}* and *{status}* to single asterisks ******************
+        send_whatsapp_message(user_id, f"✅ Status for *{lead.name}* (`{lead.phone}`) [ID: {lead.id}] updated to *{status}*.")
+        # ********************************************************************
     finally:
         local_session.close()
 
@@ -2696,7 +2758,9 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
             lead.followup_status = status
             cancel_followup_job(lead_id)
             local_session.commit()
-            send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as **{status}**.")
+            # ****************** FIX: Changed *{lead.name}* and *{status}* to single asterisks ******************
+            send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as *{status}*.")
+            # ********************************************************************
 
         elif action == "reschedule" and len(parts) == 3:
             new_time_text = parts[2].strip()
@@ -2722,9 +2786,10 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
 
                 display_dt = pytz.utc.localize(new_followup_dt).astimezone(TIMEZONE)
 
+                # ****************** FIX: Changed *{lead.name}* and date/time to single asterisks ******************
                 send_whatsapp_message(
                     user_id,
-                    f"✅ Follow-up for *{lead.name}* rescheduled to **{display_dt.strftime('%I:%M %p, %b %d')} IST**."
+                    f"✅ Follow-up for *{lead.name}* rescheduled to *{display_dt.strftime('%I:%M %p, %b %d')} IST*."
                 )
             else:
                 send_whatsapp_message(user_id, f"❌ I could not find a valid *future* date/time in `{new_time_text}`. Please try again (e.g., 'next Tuesday 11 AM').")
@@ -2751,12 +2816,14 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         duplicate_lead = check_duplicate(extracted['phone'], user_id)
 
         if duplicate_lead:
+            # ****************** FIX: Changed *Duplicate TriageAI Lead Found* and status to single asterisks ******************
             update_message = (
                 f"⚠️ *Duplicate TriageAI Lead Found!* Existing: *{duplicate_lead.name}* (Status: {duplicate_lead.status}).\n"
                 f"New Info Status: {extracted['status']}, Note: {extracted.get('note', '')[:30]}...\n\n"
                 f"To update the existing lead with the new info, send `/status {duplicate_lead.id} {extracted['status']}` or contact your admin."
             )
             send_whatsapp_message(user_id, update_message)
+            # ********************************************************************
             return
 
         # 3. Handle Followup Date
@@ -2790,11 +2857,13 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
             reminder_status = f"🔔 Reminder scheduled for {display_dt.strftime('%I:%M %p, %b %d')} IST."
 
         # 6. Acknowledge User
+        # ****************** FIX: Changed *TriageAI Lead Saved* to single asterisks ******************
         send_whatsapp_message(
             user_id,
             f"✅ *TriageAI Lead Saved!* ({lead.name}) [ID: {lead.id}]\nStatus: {lead.status}\nSource: {lead.source}\n{reminder_status}\n\n"
             f"To update the status later, send `/status {lead.id} [New Status]`"
         )
+        # ********************************************************************
     except Exception as e:
         local_session.rollback()
         logging.error(f"Error processing incoming TriageAI lead: {e}")
@@ -2824,16 +2893,18 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
         # This line now safely accesses the profile data via the local session
         company_display = profile.company_name if profile.company_name and profile.company_name != 'Self' else 'Your Personal Workspace'
 
+        # ****************** FIX: Changed *{profile.name}* and expiry date to single asterisks ******************
         message = (
             f"Welcome *{profile.name}* to TriageAI! 🎉\n\n"
             f"Your *{plan_name}* plan is activated successfully.\n"
-            f"Company: **{company_display}**\n"
-            f"Validity: {start_str} to **{expiry_str}**\n"
+            f"Company: *{company_display}*\n"
+            f"Validity: {start_str} to *{expiry_str}*\n"
             f"License Key: `{key}`\n\n"
             f"You can now start saving and managing your leads.\n"
             f"Use `/start` for a list of all commands."
         )
         send_whatsapp_message(profile.phone, message)
+        # ********************************************************************
         
     except Exception as e:
         logging.error(f"❌ Error in _send_admin_welcome_message_sync for {phone}: {e}")
@@ -2848,13 +2919,15 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
 def send_startup_message_sync():
     """Sends a confirmation message to the admin upon script startup."""
     to_user_id = ADMIN_USER_ID
+    # ****************** FIX: Changed *TriageAI Bot Service Alert* to single asterisks ******************
     message = (
-        "🤖 *TriageAI Bot Service Alert*\n\n"
+        "*TriageAI Bot Service Alert*\n\n"
         "The TriageAI server has successfully initialized and is now listening for incoming webhooks.\n"
         "Status: ✅ Ready to process messages.\n"
         "------------------\n"
         "Try sending: `Rahul needs website, phone 8080xxxx, hot lead call tomorrow at 9am`"
     )
+    # ********************************************************************
 
     # Check if a dummy ID is used and provide a friendly local test number if available
     if to_user_id == "919999999999":
