@@ -1515,7 +1515,7 @@ def pricing_page():
                 }}, 1000); // 1 second delay
                 
             }} else {{
-                document.getElementById('otpMsg').innerHTML = `❌ \${result.message}`;
+                document.getElementById('otpMsg').innerHTML = `❌ \${{result.message}}`;
             }}
         }} catch (error) {{
             console.error('Error:', error);
