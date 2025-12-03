@@ -1,0 +1,40 @@
+name: Deploy TriageAI Bot
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Connect & Deploy to Server
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.TRIAGE_HOST }}
+        username: ${{ secrets.TRIAGE_HOST_USER }}
+        key: ${{ secrets.TRIAGE_HOST_KEY }}
+        script: |
+          # Stop service
+          sudo systemctl stop LWBOT.service
+
+          # Remove old folder
+          sudo rm -rf triageaibot
+
+          # Clone repo using GIT_PAT
+          git clone https://${{ secrets.GIT_PAT }}@github.com/nikhil-thb/triageaibot.git
+
+          cd triageaibot
+
+          # Extract NEW_TOKEN from config.py
+          TOKEN=$(grep NEW_TOKEN config.py | cut -d '=' -f2 | tr -d '"')
+
+          # Make script executable
+          sudo chmod +x edit_and_reload.sh
+
+          # Run token update
+          sudo ./edit_and_reload.sh "$TOKEN"
