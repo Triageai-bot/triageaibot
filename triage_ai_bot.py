@@ -43,7 +43,7 @@ except ImportError:
         def setFont(self, *args): pass
         def drawString(self, *args): pass
         def showPage(self): pass
-        def save(self): pass
+        def save(self, *args): pass
     canvas = MockCanvas
     letter = (612, 792)
     colors = type('colors', (object,), {'black': 'black', 'grey': 'grey'})()
@@ -130,7 +130,8 @@ def verify_whatsapp_otp(phone_number: str, otp_input: str) -> bool:
     # Check expiry (e.g., 5 minutes)
     if datetime.now(TIMEZONE) - state['timestamp'] > timedelta(minutes=5):
         logging.warning(f"Verification failed for {phone_number}: Expired.")
-        del OTP_STORE[phone_number]
+        # Do NOT delete state immediately on expiry so we can give a proper message
+        # del OTP_STORE[phone_number]
         return False
 
     if state['otp'] == otp_input.strip():
@@ -317,7 +318,8 @@ def send_whatsapp_otp(phone_number: str, otp: str):
         'otp': otp,
         'timestamp': datetime.now(TIMEZONE),
         'attempts': 0,
-        'is_verified': False
+        'is_verified': False,
+        'admin_id': None # Ensure web-originated OTP doesn't have an admin ID
     }
 
 
@@ -446,15 +448,25 @@ def get_agent_company_info(user_id: str):
             company_id = company.id
             license = company.license
 
-            if license and license.is_active:
+            if license and license.expires_at:
                 now_utc = datetime.utcnow()
-                if license.expires_at is None or license.expires_at > now_utc:
+                if license.expires_at > now_utc:
                     is_active = True
                 else:
                     # Deactivation logic is handled elsewhere, but mark as inactive here for access control
                     is_active = False
+            elif license and license.is_active and license.expires_at is None:
+                 # Perpetual/Special License Case - treat as active
+                 is_active = True
+
 
     return (company_name, company_id, is_active, is_admin, agent_phone)
+
+# --- NEW: Access Control Helper ---
+def _check_active_license(user_id: str) -> bool:
+    """Checks if the user is part of a company with an active, non-expired license."""
+    _, _, is_active, _, _ = get_agent_company_info(user_id)
+    return is_active
 
 def hash_user_id(user_id: str) -> str:
     """Non-reversible hash of WhatsApp ID for secure reporting/external ID."""
@@ -546,6 +558,11 @@ def send_reminder(lead_id: int):
         if not lead:
             logging.error(f"❌ Lead {lead_id} not found for reminder")
             return
+        
+        # CRITICAL: Check license BEFORE sending reminder
+        if not _check_active_license(lead.user_id):
+            logging.warning(f"⚠️ Reminder skipped for Lead {lead_id} - user license inactive.")
+            return
 
         if lead.followup_status != "Pending":
             logging.warning(f"⚠️ Reminder skipped for Lead {lead_id} - status is {lead.followup_status}")
@@ -573,7 +590,7 @@ def send_reminder(lead_id: int):
             f"📞 *Client:* {reminder_name} (`{reminder_phone}`)\n"
             f"ℹ️ *Lead ID:* {lead_id}\n\n"
             f"📝 {reminder_note}\n\n"
-            f"Action: Send `/followup done {lead_id}`, `/followup cancel {lead_id}`, or `/followup reschedule {lead_id} [New Date/Time]`"
+            f"Action: Send `/followupdone {lead_id}`, `/followupcancel {lead_id}`, or `/followupreschedule {lead_id} [New Date/Time]`"
         )
 
         success = send_whatsapp_message(user_id, message)
@@ -648,6 +665,14 @@ def daily_summary_job_sync():
 
         for setting in enabled_users:
             user_id = setting.user_id
+            
+            # CRITICAL: Check license BEFORE sending summary
+            if not _check_active_license(user_id):
+                local_session.query(UserSetting).filter(UserSetting.user_id == user_id).update({"daily_summary_enabled": False})
+                local_session.commit()
+                logging.warning(f"Daily summary disabled for {user_id}: License inactive.")
+                continue
+
 
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
@@ -709,6 +734,12 @@ def _check_overdue_followups_sync():
         ).all()
 
         for lead in overdue_leads:
+            # CRITICAL: Check license before processing. If inactive, don't spam.
+            if not _check_active_license(lead.user_id):
+                logging.warning(f"Overdue check skipped for {lead.id}: User license inactive.")
+                cancel_followup_job(lead.id)
+                continue
+
             lead.followup_status = "Missed"
             logging.warning(f"Followup for TriageAI Lead {lead.id} marked as Missed.")
 
@@ -718,7 +749,7 @@ def _check_overdue_followups_sync():
                 lead.user_id,
                 f"⚠️ *TriageAI Missed Follow-up Alert!* Lead *{lead.name}* [ID: {lead.id}] was due on "
                 f"{followup_time}."
-                f"\n\nSend `/followup reschedule {lead.id} [New Date/Time]` to fix it."
+                f"\n\nSend `/followupreschedule {lead.id} [New Date/Time]` to fix it."
             )
             # Remove the job since it won't fire again
             cancel_followup_job(lead.id)
@@ -1234,12 +1265,17 @@ def pricing_page():
     <div class="modal-content">
         <span class="close" onclick="closeModal('otpModal')">&times;</span>
         <h2>Verify WhatsApp OTP</h2>
-        <p>A verification code has been sent to <span id="otpPhoneDisplay"></span>. Check your WhatsApp.</p>
+        <p id="otpMsg">A verification code has been sent to <span id="otpPhoneDisplay"></span>. Check your WhatsApp.</p>
         <form id="otpForm">
             <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit OTP" required 
                    title="Enter the 6-digit OTP sent to your WhatsApp">
             <button type="submit" class="start-btn" id="verifyOtpBtn">Verify OTP</button>
         </form>
+        <div style="text-align: center; margin-top: 15px;">
+            <button id="resendOtpBtn" class="start-btn" style="width: 50%; background-color: #888; display: none;" disabled>
+                Resend OTP (<span id="otpTimer">30</span>s)
+            </button>
+        </div>
     </div>
 </div>
 
@@ -1284,6 +1320,9 @@ def pricing_page():
 
     let checkoutState = {{"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""}};
 
+    let resendTimer = 30;
+    let timerInterval;
+
     function togglePricing() {{
         const isAnnual = document.getElementById('annual-toggle').checked;
         const duration = isAnnual ? 'annual' : 'monthly';
@@ -1302,13 +1341,13 @@ def pricing_page():
         const isAnnual = document.getElementById('annual-toggle').checked;
         const durationKey = isAnnual ? 'annual' : 'monthly';
         
-        const pricePerAgent = plan['price_' + durationKey];
-        const totalPrice = pricePerAgent * plan.agents;
+        const pricePerMonth = plan['price_' + durationKey];
+        const totalPrice = pricePerMonth * (isAnnual ? 12 : 1);
         
         checkoutState.price = totalPrice;
         checkoutState.backend_key = plan['key_' + durationKey];
 
-        document.getElementById('signupPlanName').textContent = plan.label;
+        document.getElementById('signupPlanName').textContent = plan.label + ' (' + (isAnnual ? 'Annual' : 'Monthly') + ')';
         document.getElementById('selectedPlan').value = planKey;
         document.getElementById('selectedDuration').value = durationKey;
         
@@ -1317,6 +1356,9 @@ def pricing_page():
 
     function closeModal(id) {{
         document.getElementById(id).style.display = 'none';
+        if (id === 'otpModal' && timerInterval) {{
+            clearInterval(timerInterval); // Stop timer when modal closes
+        }}
     }}
     
     // NEW: Function to combine country code and local number
@@ -1333,7 +1375,73 @@ def pricing_page():
         document.getElementById('waNumber').value = fullNumber; // Set hidden field
         return fullNumber;
     }}
+    
+    // NEW: OTP Timer Functions
+    function startOtpTimer() {{
+        if(timerInterval) clearInterval(timerInterval);
+        resendTimer = 30; // Reset timer
+        document.getElementById('resendOtpBtn').style.display = 'block';
+        document.getElementById('resendOtpBtn').disabled = true;
+        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
+        document.getElementById('otpTimer').textContent = resendTimer;
 
+
+        timerInterval = setInterval(() => {{
+            resendTimer--;
+            document.getElementById('otpTimer').textContent = resendTimer;
+            if (resendTimer <= 0) {{
+                clearInterval(timerInterval);
+                document.getElementById('resendOtpBtn').disabled = false;
+                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54'; // Active color
+                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
+                document.getElementById('resendOtpBtn').onclick = resendOtp;
+            }}
+        }}, 1000);
+    }}
+    
+    async function resendOtp() {{
+        document.getElementById('resendOtpBtn').disabled = true;
+        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
+        document.getElementById('resendOtpBtn').textContent = 'Sending...';
+
+        try {{
+            // Simulate resending the registration request to generate a new OTP
+            const formData = new FormData(document.getElementById('signupForm'));
+            formData.set('phone', checkoutState.phone); 
+            
+            const data = Object.fromEntries(formData.entries());
+
+            const response = await fetch('/api/register', {{
+                method: 'POST',
+                headers: {{"Content-Type": "application/json"}},
+                body: JSON.stringify(data)
+            }});
+            const result = await response.json();
+            
+            if (result.status === 'success') {{
+                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
+                startOtpTimer();
+            }} else {{
+                alert('Resend Failed: ' + result.message);
+            }}
+        }} catch (error) {{
+            alert('An unexpected error occurred during OTP resend.');
+        }} finally {{
+            if (resendTimer <= 0) {{ // Only re-enable if timer finished before submission
+                document.getElementById('resendOtpBtn').disabled = false;
+                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54';
+                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
+            }}
+        }}
+    }}
+    
+    function openOtpModal(phone) {{
+        document.getElementById('otpPhoneDisplay').textContent = phone;
+        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
+        document.getElementById('otpCode').value = ''; // Clear previous OTP
+        document.getElementById('otpModal').style.display = 'block';
+        startOtpTimer(); // Start the timer when the modal opens
+    }}
 
     document.getElementById('signupForm').addEventListener('submit', async function(event) {{
         event.preventDefault();
@@ -1364,8 +1472,7 @@ def pricing_page():
             
             if (result.status === 'success') {{
                 closeModal('signupModal');
-                document.getElementById('otpPhoneDisplay').textContent = data.phone;
-                document.getElementById('otpModal').style.display = 'block';
+                openOtpModal(data.phone); // Use the new function
             }} else {{
                 alert('Registration Failed: ' + result.message);
             }}
@@ -1391,14 +1498,21 @@ def pricing_page():
             const result = await response.json();
             
             if (result.status === 'success') {{
-                closeModal('otpModal');
-                document.getElementById('billingModal').style.display = 'block';
+                clearInterval(timerInterval); // Stop timer
+                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to Billing in 1 second.`;
+                document.getElementById('verifyOtpBtn').style.backgroundColor = '#1DA851';
+                
+                setTimeout(() => {{
+                    closeModal('otpModal');
+                    document.getElementById('billingModal').style.display = 'block';
+                }}, 1000); // 1 second delay
+                
             }} else {{
-                alert('OTP Verification Failed: ' + result.message);
+                document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
             }}
         }} catch (error) {{
             console.error('Error:', error);
-            alert('An unexpected error occurred during OTP verification.');
+            document.getElementById('otpMsg').innerHTML = `❌ An unexpected error occurred.`;
         }} finally {{
             document.getElementById('verifyOtpBtn').disabled = false;
         }}
@@ -1428,7 +1542,7 @@ def pricing_page():
                 
                 document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
                 document.getElementById('paymentAgents').textContent = planDetails.agents;
-                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price;
+                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price + (checkoutState.duration === 'annual' ? ' (Annual Total)' : ' (Monthly)');
 
                 document.getElementById('paymentModal').style.display = 'block';
             }} else {{
@@ -1529,14 +1643,24 @@ def api_verify_otp():
     data = request.json
     phone = _sanitize_wa_id(data.get('phone', ''))
     otp_input = data.get('otp', '')
+    
+    if not phone or not otp_input:
+        return jsonify({"status": "error", "message": "Missing phone or OTP"}), 400
+
+    # Check if state exists first to avoid KeyError if purged
+    state = OTP_STORE.get(phone)
+    if not state:
+        return jsonify({"status": "error", "message": "OTP expired or too many attempts. Please request a new one."}), 401
 
     if verify_whatsapp_otp(phone, otp_input):
         return jsonify({"status": "success", "message": "OTP verified."}), 200
     else:
-        # Check attempts
-        state = OTP_STORE.get(phone)
-        attempts_left = 5 - state['attempts'] if state and 'attempts' in state else 0
-
+        # Check if state was purged by failed verification
+        state_after_check = OTP_STORE.get(phone)
+        if not state_after_check:
+             return jsonify({"status": "error", "message": "Too many failed attempts. Please restart signup."}), 401
+             
+        attempts_left = 5 - state_after_check.get('attempts', 0)
         return jsonify({"status": "error", "message": f"Invalid or expired OTP. Attempts left: {attempts_left}"}), 401
 
 
@@ -1603,43 +1727,85 @@ def api_purchase():
         if not profile or not profile.is_registered:
              return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
 
-        # --- 1. Create Company and License ---
+        # --- 1. Check/Create Company and License ---
+        
+        # Check if user is already an agent
+        existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
+        
+        # Scenario 1: User is already an Admin of another company (Should have been caught earlier, but safety check)
+        if existing_agent and existing_agent.is_admin:
+             return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
+        
+        # Scenario 2: User is an agent but not linked (individual) - proceed to create new company
+        # Scenario 3: User is not in Agent table - proceed to create new company
+        
         new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]  # Generate license key
         expiry_date = datetime.utcnow() + plan_details['duration']
         plan_label = plan_details['label'] # Store label for messaging
         
-        # Ensure the user isn't already tied to a company
-        existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
-        if existing_agent and existing_agent.company_id:
-             # ERROR 409: User is already an admin. This is the source of the crash/error from previous attempts.
-             # This check is what returns the 409 status code to the browser.
-             return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
-
         company_name = profile.company_name if profile.company_name else "TriageAI Company"
-        company = Company(admin_user_id=phone, name=company_name)
-        web_session.add(company)
-        web_session.flush() # Get company.id
+        
+        # Check if we can reuse the existing company/license (for renewal logic)
+        existing_company = web_session.query(Company).filter(Company.admin_user_id == phone).first()
+        
+        if existing_company:
+            # RENEWAL PATH (Only possible if the license is expired or near expiry)
+            # For simplicity in this mock, we just update the existing license (as if payment covered it)
+            license = existing_company.license
+            if license:
+                 # Extend expiration date (or set a new one)
+                 license.expires_at = datetime.utcnow() + plan_details['duration']
+                 license.is_active = True
+                 license.plan_name = plan_label
+                 license.key = new_key # Assign a new key on renewal for tracking/consistency
+                 
+                 logging.info(f"✅ Purchase success (Renewal). License {license.key} extended for Admin {phone}.")
+                 new_key = license.key # Use the new key
+            else:
+                 # Should not happen in production if company exists, but create a new license
+                 license = License(
+                    company_id=existing_company.id,
+                    key=new_key,
+                    plan_name=plan_label,
+                    agent_limit=plan_details['agents'],
+                    is_active=True,
+                    expires_at=expiry_date
+                )
+                 web_session.add(license)
+                 existing_company.name = company_name # Update name just in case
+        
+        else:
+            # NEW PURCHASE PATH
+            company = Company(admin_user_id=phone, name=company_name)
+            web_session.add(company)
+            web_session.flush() # Get company.id
 
-        license = License(
-            company_id=company.id,
-            key=new_key,
-            plan_name=plan_label,
-            agent_limit=plan_details['agents'],
-            is_active=True,
-            expires_at=expiry_date
-        )
-        web_session.add(license)
+            license = License(
+                company_id=company.id,
+                key=new_key,
+                plan_name=plan_label,
+                agent_limit=plan_details['agents'],
+                is_active=True,
+                expires_at=expiry_date
+            )
+            web_session.add(license)
+            
+            # --- 2. Update Agent (The Buyer) ---
+            agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
+            if not agent:
+                agent = Agent(user_id=phone)
+                web_session.add(agent)
 
-        # --- 2. Update Agent (The Buyer) ---
-        agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
-        if not agent:
-             agent = Agent(user_id=phone)
-             web_session.add(agent)
-
-        agent.company_id = company.id
-        agent.is_admin = True
+            agent.company_id = company.id
+            agent.is_admin = True
+            
+            logging.info(f"✅ Purchase success (New). License {new_key} activated for Admin {phone}.")
 
         web_session.commit()
+        # Clear OTP state after final purchase step
+        if phone in OTP_STORE:
+             del OTP_STORE[phone]
+
 
         # --- 3. Send WhatsApp Welcome Message (Async) ---
         threading.Thread(
@@ -1647,7 +1813,6 @@ def api_purchase():
             args=(phone, plan_label, new_key, expiry_date) # Passing phone (PK) instead of profile object
         ).start()
 
-        logging.info(f"✅ Purchase success. License {new_key} activated for Admin {phone}.")
 
         return jsonify({"status": "success", "message": "Purchase successful. License activated."}), 200
 
@@ -1793,14 +1958,32 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
     parts = message_body.split(maxsplit=1)
     command = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
+    
+    # Standardize command to remove space for parsing consistency
+    if command == '/my':
+        command = f'/{arg.split()[0].lower()}'
+        arg = arg.split(maxsplit=1)[1] if len(arg.split()) > 1 else ""
 
     local_session = Session()
     try:
+        # Commands available to all (license info, help, registration commands)
         if command == '/start':
             _cmd_start_sync(sender_wa_id)
-        elif command == '/nextfollowups' or command == '/myfollowups':
+        elif command == '/licensesetup' or command == '/licenseinfo':
+            _cmd_license_setup_sync(sender_wa_id)
+        elif command == '/activate':
+            _cmd_activate_sync(sender_wa_id, arg)
+        elif command == '/renew': # NEW RENEW COMMAND
+            _cmd_renew_sync(sender_wa_id)
+        elif command == '/help': # NEW HELP COMMAND
+            _cmd_help_sync(sender_wa_id)
+        elif command == '/debugjobs':
+            _cmd_debug_jobs_sync(sender_wa_id)
+
+        # Commands restricted to Active License holders
+        elif command == '/myfollowups':
             _next_followups_cmd_sync(sender_wa_id)
-        elif command == '/myleads': # New command for agent-specific leads
+        elif command == '/myleads': 
             _search_cmd_sync(sender_wa_id, f"user {sender_wa_id}")
         elif command == '/dailysummary':
             _daily_summary_control_sync(sender_wa_id, arg)
@@ -1808,10 +1991,6 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
             _pipeline_view_cmd_sync(sender_wa_id)
         elif command == '/setcompanyname':
             _cmd_set_company_name_sync(sender_wa_id, arg)
-        elif command == '/licensesetup' or command == '/licenseinfo':
-            _cmd_license_setup_sync(sender_wa_id)
-        elif command == '/activate':
-            _cmd_activate_sync(sender_wa_id, arg)
         elif command == '/addagent':
             _cmd_add_agent_sync(sender_wa_id, arg)
         elif command == '/removeagent':
@@ -1824,7 +2003,7 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
             _team_followups_cmd_sync(sender_wa_id)
         elif command == '/search':
             _search_cmd_sync(sender_wa_id, arg)
-        elif command.startswith('/report'): # Handles /report, /reporttext, /reportexcel, /reportpdf
+        elif command.startswith('/report'):
             if command == '/report':
                 if not arg:
                     _report_follow_up_prompt(sender_wa_id)
@@ -1839,16 +2018,14 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
                  _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}")
         elif command == '/status':
             _status_update_cmd_sync(sender_wa_id, arg)
-        elif command == '/followup' or command == '/setfollowup':
-            _handle_followup_cmd_sync(sender_wa_id, arg)
+        elif command.startswith('/followup'): # Covers /followup, /setfollowup, /followupdone, /followupcancel, /followupreschedule
+            _handle_followup_cmd_sync(sender_wa_id, message_body)
         elif command == '/add' and arg.startswith('note'): # Handles /add note [id] [text]
             _cmd_add_note_sync(sender_wa_id, arg.replace('note', '', 1).strip())
-        elif command == '/debugjobs':
-            _cmd_debug_jobs_sync(sender_wa_id)
         elif command == '/save' and arg.startswith('lead'): # Handles /save lead <details>
             _process_incoming_lead_sync(sender_wa_id, arg.replace('lead', '', 1).strip())
         else:
-            send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/start` for instructions.")
+            send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
     finally:
         # Commands that modify the DB will commit inside their function.
         local_session.close()
@@ -1875,6 +2052,60 @@ def _register_agent_sync(user_id: str):
     finally:
         local_session.close()
 
+def _cmd_help_sync(user_id: str):
+    """Handles the new /help command to list all tags."""
+    
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    
+    core_commands = (
+        "### ⚡ *Core Lead Commands (Requires Active License)*\n"
+        "• Save a new lead: Send lead directly or use `/savelead [details]`\n"
+        "• View personal leads: `/myleads`\n"
+        "• View pending follow-ups: `/myfollowups`\n"
+        "• Update lead status: `/status [ID] [New|Hot|Converted|Follow-Up]`\n"
+        "• Set/Reschedule followup: `/setfollowup [ID] [Date/Time]`\n"
+        "• Add notes to a lead: `/addnote [ID] [Text]`\n"
+        "• Mark followup done/cancel: `/followupdone [ID]`, `/followupcancel [ID]`\n"
+    )
+
+    reporting_commands = (
+        "### 📊 *Reporting & Utilities (Requires Active License)*\n"
+        "• See status counts: `/pipeline`\n"
+        "• Find specific leads: `/search [Keyword/Filter]`\n"
+        "• Generate reports (Text/Excel/PDF): `/report [last week]` or `/reportpdf [date]`\n"
+        "• Daily summary control: `/dailysummary on/off`\n"
+    )
+
+    admin_commands = ""
+    if is_admin and is_active:
+        admin_commands = (
+            "### 👑 *Admin Management (Requires Admin Status)*\n"
+            "• Check agent slots: `/remainingslots`\n"
+            "• Add a new agent: `/addagent [WA Phone No.]`\n"
+            "• Remove an agent: `/removeagent [WA Phone No.]`\n"
+            "• See team leads/pipeline: `/teamleads`\n"
+            "• See team followups: `/teamfollowups`\n"
+            "• Set company name: `/setcompanyname [Name]`\n"
+        )
+    
+    licensing_commands = (
+        "### 🔑 *Account Management (Available to All)*\n"
+        "• View license status: `/licensesetup`\n"
+        "• Activate a license key: `/activate [KEY]`\n"
+        "• Renew/Purchase license: `/renew`\n"
+        "• Full command list: `/start`\n"
+    )
+    
+    welcome_text = (
+        f"👋 *TriageAI Command Tags List*\n\n"
+        f"{core_commands}\n"
+        f"{reporting_commands}\n"
+        f"{admin_commands}\n"
+        f"{licensing_commands}"
+    )
+
+    send_whatsapp_message(user_id, welcome_text)
+
 def _cmd_start_sync(user_id: str):
     """Handles /start command."""
     _register_agent_sync(user_id) # Redundant call but ensures registration is complete
@@ -1887,29 +2118,33 @@ def _cmd_start_sync(user_id: str):
     )
 
     if not is_active:
-        welcome_text += "⚠️ *Individual/Inactive Setup.* Use `/activate [key]` to join a company or use the website for purchase.\n\n"
+        welcome_text += "⚠️ *Individual/Inactive Setup.* Use `/activate [key]` to join a company or use the website for purchase. Send `/renew` or `/licensesetup` for details.\n\n"
     elif is_active and company_id and is_admin:
         welcome_text += "👑 *TriageAI Multi-Agent Admin Setup Active.*\n\n"
     elif is_active and company_id and not is_admin:
         welcome_text += "👥 *TriageAI Multi-Agent Agent Setup Active.* You manage your personal leads.\n\n"
+        
+    welcome_text += "Send `/help` for a compact list of all commands.\n"
 
-    # --- New Agent Commands for ALL Users ---
+    # --- New Agent Commands for ALL Users (Visible on START but restricted later) ---
     welcome_text += "### ⚡ *Core Lead Commands*\n"
-    welcome_text += "• Send a new lead directly or use: `/save lead [details]`\n"
-    welcome_text += "• `/my leads`: View all your personal leads.\n"
-    welcome_text += "• `/my followups`: See your next pending follow-ups.\n"
+    welcome_text += "• Send a new lead directly or use: `/savelead [details]`\n"
+    welcome_text += "• `/myleads`: View all your personal leads.\n"
+    welcome_text += "• `/myfollowups`: See your next pending follow-ups.\n"
     welcome_text += "• `/status [ID] [New|Hot|Converted]`: Update lead status.\n"
     welcome_text += "• `/setfollowup [ID] [Date/Time]`: Reschedule/Set followup.\n"
-    welcome_text += "• `/add note [ID] [Text]`: Add notes to a lead.\n\n"
+    welcome_text += "• `/addnote [ID] [Text]`: Add notes to a lead.\n\n"
 
     # --- Admin Commands ---
-    if is_admin:
+    if is_admin and is_active:
+        current_agents = session.query(Agent).filter(Agent.company_id == company_id).count()
+        limit = session.query(Company).get(company_id).license.agent_limit if company_id else 1
         welcome_text += "### 👑 *Admin Management*\n"
-        welcome_text += f"• `/remaining-slots`: Check agent limits ({len(session.query(Agent).filter(Agent.company_id == company_id).all())}/{session.query(Company).get(company_id).license.agent_limit if company_id else 1}).\n"
+        welcome_text += f"• `/remainingslots`: Check agent limits ({current_agents}/{limit}).\n"
         welcome_text += "• `/addagent [WA Phone No.]`: Add a new agent (requires OTP verification).\n"
         welcome_text += "• `/removeagent [WA Phone No.]`: Remove an agent.\n"
-        welcome_text += "• `/team leads`: See the entire company pipeline.\n"
-        welcome_text += "• `/team followups`: See all upcoming followups.\n"
+        welcome_text += "• `/teamleads`: See the entire company pipeline.\n"
+        welcome_text += "• `/teamfollowups`: See all upcoming followups.\n"
         welcome_text += "• `/setcompanyname [Name]`\n\n"
 
     welcome_text += (
@@ -1923,12 +2158,17 @@ def _cmd_start_sync(user_id: str):
     send_whatsapp_message(user_id, welcome_text)
 
 def _cmd_add_note_sync(user_id: str, arg: str):
-    """Handles /add note [ID] [text]"""
+    """Handles /addnote [ID] [text]"""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to add notes. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         parts = arg.split(maxsplit=1)
         if len(parts) != 2:
-            send_whatsapp_message(user_id, "Usage: `/add note [Lead ID] [Note Text]`")
+            send_whatsapp_message(user_id, "Usage: `/addnote [Lead ID] [Note Text]`")
             return
 
         try:
@@ -1955,7 +2195,7 @@ def _cmd_add_note_sync(user_id: str, arg: str):
                 is_company_admin = True
 
         if not (is_owner or is_company_admin):
-            send_whatsapp_message(user_id, f"❌ You do not have permission to add notes to Lead ID {lead_id}.")
+            send_whatsapp_message(user_id, f"❌ You do not have permission to add notes to Lead ID {lead.id}. Only the owner or a company admin can update this.")
             return
 
         # Append note with timestamp
@@ -1994,6 +2234,11 @@ def _cmd_debug_jobs_sync(user_id: str):
 
 def _next_followups_cmd_sync(user_id: str):
     """Show upcoming pending follow-ups."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view follow-ups. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         now_utc_naive = datetime.utcnow().replace(tzinfo=None)
@@ -2022,13 +2267,18 @@ def _next_followups_cmd_sync(user_id: str):
             )
             response += lead_block
 
-        response += "\n*Actions:*\n• `/followup done [ID]`\n• `/followup reschedule [ID] [New Date/Time]`"
+        response += "\n*Actions:*\n• `/followupdone [ID]`\n• `/followupreschedule [ID] [New Date/Time]`"
         send_whatsapp_message(user_id, response)
     finally:
         local_session.close()
 
 def _daily_summary_control_sync(user_id: str, arg: str):
     """Daily summary control."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to control summaries. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         action = arg.lower()
@@ -2061,15 +2311,27 @@ def _daily_summary_control_sync(user_id: str, arg: str):
 
 def _pipeline_view_cmd_sync(user_id: str):
     """Pipeline view."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
+        return
+        
     text = format_pipeline_text(user_id)
     send_whatsapp_message(user_id, text)
 
 def _check_admin_permissions(user_id: str, command: str) -> bool:
     """Helper to check admin status and send error message if not an admin."""
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    if not is_admin or not is_active:
+    
+    # Combined check for active license and admin status
+    if not is_active:
+        send_whatsapp_message(user_id, f"❌ Command *{command}* failed: Your TriageAI license is inactive. Send `/renew` or `/licensesetup`.")
+        return False
+        
+    if not is_admin:
         send_whatsapp_message(user_id, f"❌ Command *{command}* is restricted. Only the active TriageAI Company Admin can run this.")
         return False
+        
     return True
 
 def _cmd_set_company_name_sync(user_id: str, company_name: str):
@@ -2099,7 +2361,7 @@ def _cmd_license_setup_sync(user_id: str):
             company = local_session.query(Company).get(company_id)
             license = company.license
 
-            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A'
+            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
 
             message = (
@@ -2107,21 +2369,62 @@ def _cmd_license_setup_sync(user_id: str):
                 f"• *Company:* {company.name}\n"
                 f"• *Plan:* {license.plan_name}\n"
                 f"• *Agents:* {current_agents} / {license.agent_limit}\n"
-                f"• *Status:* {'✅ ACTIVE' if is_active else '❌ INACTIVE'}\n"
+                f"• *Status:* {'✅ ACTIVE' if is_active else '❌ INACTIVE / EXPIRED'}\n"
                 f"• *Expires:* {expiry_str}"
             )
+            
+            if not is_active:
+                 message += f"\n\n🚨 *ACTION REQUIRED:* Your license has expired. Send `/renew` to get the payment link."
+                 
             send_whatsapp_message(user_id, message)
             return
 
         send_whatsapp_message(
             user_id,
             f"💳 *Purchase a TriageAI License*\n\n"
-            f"To purchase a new license key, please visit our secure portal:\n"
-            f"🌐 `http://yourdomain.com/`\n\n"
+            f"You do not have an active license. To purchase or join a company:\n"
+            f"1. *PURCHASE:* Visit our secure portal and purchase a plan: 🌐 `http://yourdomain.com/` (Send `/renew`)\n"
+            f"2. *JOIN:* Ask your company admin for a license key.\n\n"
             f"Once you receive your key, use `/activate [KEY]`."
         )
     finally:
         local_session.close()
+        
+def _cmd_renew_sync(user_id: str):
+    """Provides the link to the web purchase page for license renewal/purchase."""
+    
+    # Check if they are tied to a company (admin) or not (new customer)
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    
+    if company_id and is_admin:
+        local_session = Session()
+        try:
+            company = local_session.query(Company).get(company_id)
+            license = company.license
+            
+            status = 'Active' if is_active else 'Expired'
+            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
+            
+            message = (
+                f"💳 *TriageAI License Renewal*\n"
+                f"Company: {company.name}\n"
+                f"Your plan: *{license.plan_name}*\n"
+                f"Status: {status} (Expires: {expiry_str})\n\n"
+                f"To renew your license, please visit our secure portal:\n"
+                f"🌐 `http://yourdomain.com/` (Please log in with your Admin WhatsApp number for renewal.)"
+            )
+            send_whatsapp_message(user_id, message)
+        finally:
+            local_session.close()
+    else:
+         # Non-paying user or agent trying to buy a license
+        send_whatsapp_message(
+            user_id,
+            f"💳 *TriageAI Purchase/Renewal*\n\n"
+            f"To purchase a new license key or start your subscription, please visit our secure portal:\n"
+            f"🌐 `http://yourdomain.com/`\n\n"
+            f"Once purchased, use `/activate [KEY]` to start."
+        )
 
 def _cmd_activate_sync(user_id: str, key_input: str):
     local_session = Session()
@@ -2188,10 +2491,10 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
     """Generates an OTP for the new agent for verification."""
     local_session = Session()
     try:
-        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-
-        if not _check_admin_permissions(user_id, "/addagent") or not is_active or not company_id:
+        if not _check_admin_permissions(user_id, "/addagent"):
             return
+            
+        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id) # is_active/is_admin checked above
 
         company = local_session.query(Company).get(company_id)
         license = company.license
@@ -2263,7 +2566,8 @@ def _cmd_verify_agent_otp_sync(sender_wa_id: str, otp_input: str):
         otp_state = OTP_STORE.get(sender_wa_id)
 
         if not otp_state or otp_state.get('admin_id') is None:
-            return # Let the regular lead processing handle this if no OTP is pending
+            send_whatsapp_message(sender_wa_id, "⚠️ Invalid state or OTP expired. Please ask your Admin to re-add you.")
+            return
 
         # Validate OTP
         if not verify_whatsapp_otp(sender_wa_id, otp_input):
@@ -2287,14 +2591,7 @@ def _cmd_verify_agent_otp_sync(sender_wa_id: str, otp_input: str):
         # Send final welcome message to agent
         final_agent_welcome_message = (
             f"Hi! TriageAI welcomes you to *{company.name}*.\n\n"
-            f"You can now save and manage your leads and follow-ups. All commands start with a slash `/`:\n\n"
-            f"Tags:\n"
-            f"• `/save lead` — Add a new lead\n"
-            f"• `/my leads` — View your leads\n"
-            f"• `/my followups` — Today + upcoming follow-ups\n"
-            f"• `/add note [id] [text]` — Add notes to a lead\n"
-            f"• `/set followup [id] [date]` — Schedule follow-up\n\n"
-            f"Let’s grow your sales! 🚀"
+            f"Your account is active. Send `/help` for a list of commands."
         )
         send_whatsapp_message(sender_wa_id, final_agent_welcome_message)
 
@@ -2350,7 +2647,7 @@ def _cmd_remove_agent_sync(user_id: str, agent_id_str: str):
 
 def _cmd_remaining_slots_sync(user_id: str):
     """Admin feature: Show remaining agent slots."""
-    if not _check_admin_permissions(user_id, "/remaining-slots"):
+    if not _check_admin_permissions(user_id, "/remainingslots"):
         return
 
     local_session = Session()
@@ -2425,6 +2722,11 @@ def _team_followups_cmd_sync(user_id: str):
 
 def _search_cmd_sync(user_id: str, search_query: str):
     """Instant search by keyword, name, phone, or status."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         parts = search_query.split(maxsplit=1)
@@ -2473,7 +2775,11 @@ def _search_cmd_sync(user_id: str, search_query: str):
 
 def _report_cmd_sync_with_arg(user_id: str, query: str):
     """Handles /report command with a date query argument provided immediately."""
-
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        return
+        
     logging.info(f"🎯 _report_cmd_sync_with_arg called with query: '{query}'")
 
     # Process the query immediately to get filters
@@ -2509,7 +2815,11 @@ def _report_cmd_sync_with_arg(user_id: str, query: str):
 
 def _report_follow_up_prompt(user_id: str):
     """Prompts the user for the report date/range."""
-
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        return
+        
     prompt_message = (
         "🗓️ *TriageAI Report Generation: Date Required*\n\n"
         "Please send the period you want to report on as a text message now. Examples:\n"
@@ -2523,6 +2833,11 @@ def _report_follow_up_prompt(user_id: str):
 
 def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
     """Handles the final report generation triggered by a button press or direct command."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         parts = full_command.split(maxsplit=1)
@@ -2625,6 +2940,11 @@ def _generate_and_send_file_sync(user_id: str, leads: List[Lead], file_type: str
 
 def _status_update_cmd_sync(user_id: str, arg: str):
     """Handles /status [ID] [New|Hot|Converted|Follow-Up]"""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to update status. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         parts = arg.split(maxsplit=1)
@@ -2660,7 +2980,7 @@ def _status_update_cmd_sync(user_id: str, arg: str):
                 is_company_admin = True
 
         if not (is_owner or is_company_admin):
-            send_whatsapp_message(user_id, f"❌ TriageAI Lead ID {lead_id} found, but you do not have permission to modify it. Only the owner ({lead.user_id}) or a company admin can update this status.")
+            send_whatsapp_message(user_id, f"❌ TriageAI Lead ID {lead.id} found, but you do not have permission to modify it. Only the owner ({lead.user_id}) or a company admin can update this status.")
             return
 
         lead.status = status
@@ -2669,18 +2989,32 @@ def _status_update_cmd_sync(user_id: str, arg: str):
     finally:
         local_session.close()
 
-def _handle_followup_cmd_sync(user_id: str, arg: str):
-    """Handles /followup [action] [ID] [arg]"""
+def _handle_followup_cmd_sync(user_id: str, full_command: str):
+    """
+    Handles all follow-up commands:
+    /setfollowup [ID] [Time]
+    /followupdone [ID]
+    /followupcancel [ID]
+    /followupreschedule [ID] [Time]
+    """
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for follow-ups. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
-        parts = arg.split(maxsplit=2)
-        if len(parts) < 2:
-            send_whatsapp_message(user_id, "Usage:\n• /followup done [ID]\n• /followup cancel [ID]\n• /followup reschedule [ID] [New Date/Time]")
+        command_parts = full_command.split(maxsplit=1)
+        command_tag = command_parts[0].lower()
+        arg = command_parts[1] if len(command_parts) > 1 else ""
+        
+        arg_parts = arg.split(maxsplit=1)
+        if not arg_parts:
+            send_whatsapp_message(user_id, "Usage:\n• /setfollowup [ID] [Time]\n• /followupdone [ID]\n• /followupcancel [ID]\n• /followupreschedule [ID] [New Time]")
             return
 
-        action = parts[0].lower()
         try:
-            lead_id = int(parts[1].strip())
+            lead_id = int(arg_parts[0].strip())
         except ValueError:
             send_whatsapp_message(user_id, "❌ Invalid Lead ID format. Must be a number.")
             return
@@ -2691,6 +3025,8 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
             send_whatsapp_message(user_id, f"❌ TriageAI Follow-up action failed. Lead ID {lead_id} not found or doesn't belong to you.")
             return
 
+        action = command_tag.replace('/followup', '').replace('/set', '').lower()
+
         if action in ["done", "cancel"]:
             status = "Done" if action == "done" else "Canceled"
             lead.followup_status = status
@@ -2698,8 +3034,12 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
             local_session.commit()
             send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as *{status}*.")
 
-        elif action == "reschedule" and len(parts) == 3:
-            new_time_text = parts[2].strip()
+        elif action in ["reschedule", ""]: # "" covers /setfollowup
+            new_time_text = arg_parts[1].strip() if len(arg_parts) == 2 else ""
+
+            if not new_time_text:
+                send_whatsapp_message(user_id, "❌ Missing date/time. Usage: `/setfollowup [ID] [Time]` (e.g., 'tomorrow 10 AM')")
+                return
 
             extracted = extract_lead_data(new_time_text)
             new_followup_dt = None
@@ -2729,12 +3069,17 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
             else:
                 send_whatsapp_message(user_id, f"❌ I could not find a valid *future* date/time in `{new_time_text}`. Please try again (e.g., 'next Tuesday 11 AM').")
         else:
-            send_whatsapp_message(user_id, "❌ Invalid followup command format. Use `/followup done [ID]`, `/followup cancel [ID]`, or `/followup reschedule [ID] [New Time]`")
+            send_whatsapp_message(user_id, "❌ Invalid followup command. Use `/help` for list.")
     finally:
         local_session.close()
 
 def _process_incoming_lead_sync(user_id: str, message_body: str):
     """Processes a new lead message, handling extraction and duplicates."""
+    # CRITICAL: Access Control Check
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to save leads. Send `/renew` or `/licensesetup`.")
+        return
+        
     local_session = Session()
     try:
         # 1. Extract Lead Data
@@ -2743,7 +3088,7 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         if not extracted or not extracted.get('name') or not extracted.get('phone'):
             send_whatsapp_message(
                 user_id,
-                "I need a clear name and phone number to save a lead. Please try again with full details or use `/start` for examples."
+                "I need a clear name and phone number to save a lead. Please try again with full details or use `/help` for examples."
             )
             return
 
@@ -2831,7 +3176,7 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
             f"Validity: {start_str} to *{expiry_str}*\n"
             f"License Key: `{key}`\n\n"
             f"You can now start saving and managing your leads.\n"
-            f"Use `/start` for a list of all commands."
+            f"Use `/help` for a list of all commands."
         )
         send_whatsapp_message(profile.phone, message)
         
