@@ -303,8 +303,8 @@ def send_whatsapp_otp(phone_number: str, otp: str):
     logging.info(f"🔑 MOCK OTP: Sending {otp} to {phone_number}...")
 
     message = (
-        f"🔒 TriageAI OTP: Your verification code is **{otp}**. "
-        f"For agent setup, reply with **only the code** to verify. "
+        f"🔒 TriageAI OTP: Your verification code is *{otp}*. "
+        f"For agent setup, reply with *only the code* to verify. "
         f"For web setup, enter it on the website."
     )
 
@@ -683,12 +683,12 @@ def daily_summary_job_sync():
                 report_scope = "TriageAI Daily Company Summary"
 
             text = f"☀️ *{report_scope} - {now_ist.strftime('%b %d')}*\n\n"
-            text += f"Total Leads Today: **{total_today}**\n"
-            text += f"Converted Today: **{status_counts.get('Converted', 0)}**\n"
-            text += f"Hot Leads: **{status_counts.get('Hot', 0)}**\n"
+            text += f"Total Leads Today: *{total_today}*\n"
+            text += f"Converted Today: *{status_counts.get('Converted', 0)}*\n"
+            text += f"Hot Leads: *{status_counts.get('Hot', 0)}*\n"
             text += f"--- Follow-ups (Personal) ---\n"
-            text += f"Pending Follow-ups: **{pending_followups}**\n"
-            text += f"Missed/Overdue Follow-ups: **{missed_followups}**"
+            text += f"Pending Follow-ups: *{pending_followups}*\n"
+            text += f"Missed/Overdue Follow-ups: *{missed_followups}*"
 
             send_whatsapp_message(user_id, text)
 
@@ -1075,10 +1075,10 @@ def format_pipeline_text(user_id: str) -> str:
         title = "TriageAI Company Pipeline View"
 
     text = f"📈 *{title}*\n\n"
-    text += f"• **New Leads:** {counts.get('New', 0)}\n"
-    text += f"• **Hot Leads:** {counts.get('Hot', 0)}\n"
-    text += f"• **Follow-Up Leads:** {counts.get('Follow-Up', 0)}\n"
-    text += f"• **Converted Leads:** {counts.get('Converted', 0)}\n"
+    text += f"• *New Leads:* {counts.get('New', 0)}\n"
+    text += f"• *Hot Leads:* {counts.get('Hot', 0)}\n"
+    text += f"• *Follow-Up Leads:* {counts.get('Follow-Up', 0)}\n"
+    text += f"• *Converted Leads:* {counts.get('Converted', 0)}\n"
 
     return text
 
@@ -1986,7 +1986,7 @@ def _cmd_debug_jobs_sync(user_id: str):
 
     for job in jobs:
         next_run_str = job.next_run_time.strftime('%I:%M %p, %b %d %Z') if job.next_run_time else 'N/A'
-        response += f"• **{job.id}**\n"
+        response += f"• *{job.id}*\n"
         response += f"  Next run: {next_run_str}\n"
         response += f"  Trigger: {job.trigger}\n\n"
 
@@ -2016,7 +2016,7 @@ def _next_followups_cmd_sync(user_id: str):
 
             lead_block = (
                 f"\n*Lead ID: {lead.id}*\n"
-                f"• **{lead.name}** (`{lead.phone}`)\n"
+                f"• *{lead.name}* (`{lead.phone}`)\n"
                 f"  > Time: {followup_time}\n"
                 f"  > Note: {lead.note[:50]}...\n"
             )
@@ -2239,8 +2239,8 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
         # Send OTP message to the new agent's WhatsApp
         agent_otp_message = (
             f"Hi! You have been invited to join *{company.name}* on TriageAI.\n"
-            f"🔒 Your one-time verification code is: **{otp}**\n"
-            f"Reply with **only the {otp} code** to this chat to confirm your agent account."
+            f"🔒 Your one-time verification code is: *{otp}*\n"
+            f"Reply with *only the {otp} code* to this chat to confirm your agent account."
         )
         send_whatsapp_message(new_agent_id, agent_otp_message)
 
@@ -2369,7 +2369,7 @@ def _cmd_remaining_slots_sync(user_id: str):
             f"• *Plan:* {license.plan_name}\n"
             f"• *Agent Limit:* {limit}\n"
             f"• *Current Agents:* {current_agents}\n"
-            f"• *Remaining Slots:* **{remaining}**"
+            f"• *Remaining Slots:* *{remaining}*"
         )
         send_whatsapp_message(user_id, response)
     finally:
@@ -2413,7 +2413,7 @@ def _team_followups_cmd_sync(user_id: str):
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
             lead_block = (
                 f"\n*Lead ID: {lead.id}* (Agent: {hash_user_id(lead.user_id)})\n"
-                f"• **{lead.name}** (`{lead.phone}`)\n"
+                f"• *{lead.name}* (`{lead.phone}`)\n"
                 f"  > Time: {followup_time}\n"
                 f"  > Note: {lead.note[:50]}...\n"
             )
@@ -2665,7 +2665,7 @@ def _status_update_cmd_sync(user_id: str, arg: str):
 
         lead.status = status
         local_session.commit()
-        send_whatsapp_message(user_id, f"✅ Status for *{lead.name}* (`{lead.phone}`) [ID: {lead.id}] updated to **{status}**.")
+        send_whatsapp_message(user_id, f"✅ Status for *{lead.name}* (`{lead.phone}`) [ID: {lead.id}] updated to *{status}*.")
     finally:
         local_session.close()
 
@@ -2696,7 +2696,7 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
             lead.followup_status = status
             cancel_followup_job(lead_id)
             local_session.commit()
-            send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as **{status}**.")
+            send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as *{status}*.")
 
         elif action == "reschedule" and len(parts) == 3:
             new_time_text = parts[2].strip()
@@ -2724,7 +2724,7 @@ def _handle_followup_cmd_sync(user_id: str, arg: str):
 
                 send_whatsapp_message(
                     user_id,
-                    f"✅ Follow-up for *{lead.name}* rescheduled to **{display_dt.strftime('%I:%M %p, %b %d')} IST**."
+                    f"✅ Follow-up for *{lead.name}* rescheduled to *{display_dt.strftime('%I:%M %p, %b %d')} IST*."
                 )
             else:
                 send_whatsapp_message(user_id, f"❌ I could not find a valid *future* date/time in `{new_time_text}`. Please try again (e.g., 'next Tuesday 11 AM').")
@@ -2827,8 +2827,8 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
         message = (
             f"Welcome *{profile.name}* to TriageAI! 🎉\n\n"
             f"Your *{plan_name}* plan is activated successfully.\n"
-            f"Company: **{company_display}**\n"
-            f"Validity: {start_str} to **{expiry_str}**\n"
+            f"Company: *{company_display}*\n"
+            f"Validity: {start_str} to *{expiry_str}*\n"
             f"License Key: `{key}`\n\n"
             f"You can now start saving and managing your leads.\n"
             f"Use `/start` for a list of all commands."
@@ -2892,7 +2892,7 @@ def send_startup_message_sync():
 
 def clear_all_db_on_startup():
     """
-    *** DESTRUCTIVE ACTION FOR TESTING ***
+    * DESTRUCTIVE ACTION FOR TESTING *
     Clears all application-specific data (Leads, Companies, Licenses, Profiles)
     and resets agents to individual status.
     """
@@ -2979,10 +2979,10 @@ def main_concurrent():
     if WEB_AUTH_TOKEN == "super_secret_web_key_123":
         print("⚠️ WARNING: WEB_AUTH_TOKEN is using default. Set it as an env var for security!")
 
-    # *** STEP 1: CLEAR DB BEFORE STARTING ***
+    # * STEP 1: CLEAR DB BEFORE STARTING *
     clear_all_db_on_startup()
     
-    # *** STEP 2: START SCHEDULER ***
+    # * STEP 2: START SCHEDULER *
     run_scheduler()
 
     # Send startup message in background thread
