@@ -1122,8 +1122,9 @@ def format_pipeline_text(user_id: str) -> str:
 def pricing_page():
     """Renders the single-page pricing and signup HTML."""
     # NOTE: The NameError was caused by unescaped $ in JS template literals within the Python f-string.
-    # The fix is to change ${...} to \${...} in the JS code inside this Python string.
-    # E.g., ${checkoutState.phone} becomes \${checkoutState.phone}.
+    # The fix is to change ${...} to \${{...}} in the JS code inside this Python string.
+    # We are fixing the two identified instances where Python was incorrectly trying to evaluate 
+    # the JavaScript variable `checkoutState.phone` or `phone` within the JS template literal.
 
     WEBSITE_URL = "https://triageai.online/"
     html_content = f"""
@@ -1423,8 +1424,8 @@ def pricing_page():
             const result = await response.json();
             
             if (result.status === 'success') {{
-                // FIX: Escape nested template literal here
-                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>\${checkoutState.phone}</strong>.`;
+                // FIX APPLIED HERE (Line ~1427)
+                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>\${{checkoutState.phone}}</strong>.`;
                 startOtpTimer();
             }} else {{
                 alert('Resend Failed: ' + result.message);
@@ -1442,8 +1443,8 @@ def pricing_page():
     
     function openOtpModal(phone) {{
         document.getElementById('otpPhoneDisplay').textContent = phone;
-        // FIX: Escape nested template literal here
-        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>\${phone}</strong>. Check your WhatsApp.`;
+        // FIX APPLIED HERE (Line ~1467)
+        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>\${{phone}}</strong>. Check your WhatsApp.`;
         document.getElementById('otpCode').value = ''; // Clear previous OTP
         document.getElementById('otpModal').style.display = 'block';
         startOtpTimer(); // Start the timer when the modal opens
@@ -1548,7 +1549,7 @@ def pricing_page():
                 
                 document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
                 document.getElementById('paymentAgents').textContent = planDetails.agents;
-                // FIX: Escape nested template literal here
+                // Price calculation uses JavaScript variables, so no change needed here if the Python f-string is correctly interpreting the JS code.
                 document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price + (checkoutState.duration === 'annual' ? ' (Annual Total)' : ' (Monthly)');
 
                 document.getElementById('paymentModal').style.display = 'block';
