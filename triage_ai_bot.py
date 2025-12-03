@@ -114,6 +114,26 @@ PLANS = {
 # --- IN-MEMORY STATE FOR OTP ---
 OTP_STORE: Dict[str, Dict[str, Any]] = {}
 
+# --- IN-MEMORY STATE FOR RENEWAL LINKS ---
+# Using RENEWAL_TOKEN_STORE for temporary token storage: {'token_uuid': {'phone': str, 'timestamp': datetime, 'is_verified': bool}}
+RENEWAL_TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
+RENEWAL_TOKEN_TIMEOUT = timedelta(minutes=15)
+
+def generate_renewal_token(phone_number: str) -> str:
+    """Generates a UUID for a personalized renewal link."""
+    token = str(uuid.uuid4())
+    RENEWAL_TOKEN_STORE[token] = {
+        'phone': phone_number,
+        'timestamp': datetime.now(TIMEZONE),
+    }
+    # Clean up old tokens (optional, but good practice)
+    now = datetime.now(TIMEZONE)
+    expired_keys = [k for k, v in RENEWAL_TOKEN_STORE.items() if now - v['timestamp'] > RENEWAL_TOKEN_TIMEOUT]
+    for key in expired_keys:
+        del RENEWAL_TOKEN_STORE[key]
+        
+    return token
+
 def generate_otp() -> str:
     """Generates a 6-digit numeric OTP."""
     return str(random.randint(100000, 999999))
@@ -1599,6 +1619,298 @@ def pricing_page():
     return html_content
 
 
+@APP.route('/renew_link/<token>')
+def renew_link_handler(token: str):
+    """Handles the personalized renewal link from WhatsApp."""
+    if token not in RENEWAL_TOKEN_STORE:
+        return "<p>❌ Renewal Link Expired or Invalid. Please request a new link via WhatsApp by sending /renew.</p>", 404
+
+    token_data = RENEWAL_TOKEN_STORE[token]
+    phone = token_data['phone']
+    
+    # Check expiry
+    if datetime.now(TIMEZONE) - token_data['timestamp'] > RENEWAL_TOKEN_TIMEOUT:
+        del RENEWAL_TOKEN_STORE[token] # Purge on expiry
+        return "<p>❌ Renewal Link Expired. Please request a new link via WhatsApp by sending /renew.</p>", 404
+        
+    local_session = Session()
+    try:
+        # Fetch data needed for the personalized page
+        agent = local_session.query(Agent).filter(Agent.user_id == phone).first()
+        if not agent or not agent.is_admin or not agent.company_id:
+            # Token is valid but user is not an Admin/licensed user in DB
+            return "<p>❌ Access Denied. Your account is not authorized for this renewal link. You must be the company administrator to renew.</p>", 403
+            
+        company = local_session.query(Company).get(agent.company_id)
+        license = company.license
+        
+        # Determine the base plan name (e.g., '5user' from '5-User Team Monthly')
+        # We need to look up the PLANS dict keys like '5user_monthly'
+        
+        # Find the full plan key first based on the stored label
+        full_plan_key = next(
+            (k for k, p in PLANS.items() if p['label'] == license.plan_name), 
+            'individual' # Default to individual if somehow misaligned
+        )
+        
+        # Extract the base key (e.g., '5user' from '5user_monthly')
+        if full_plan_key.endswith('_monthly'):
+             base_plan_key = full_plan_key.replace('_monthly', '')
+        elif full_plan_key.endswith('_annual'):
+             base_plan_key = full_plan_key.replace('_annual', '')
+        else:
+             base_plan_key = full_plan_key
+
+        
+        # Look up price info for the monthly/annual equivalent of the base plan
+        price_monthly = PLANS.get(f'{base_plan_key}_monthly', PLANS['individual'])['price']
+        price_annual = PLANS.get(f'{base_plan_key}_annual', PLANS['individual'])['price']
+        
+        # Mocking the discounted display price for the frontend (reverse calculation)
+        monthly_display_price = price_monthly
+        annual_display_price_per_month = price_annual / 12 if price_annual else price_monthly
+        
+        profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
+
+        # Construct data for the HTML template
+        renewal_data = {
+            'name': company.name,
+            'wa_admin_name': profile.name if profile else "Administrator",
+            'phone': phone,
+            'plan_name': license.plan_name,
+            'expired_at': pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A',
+            'base_plan': base_plan_key, # e.g., '5user'
+            'price_monthly': monthly_display_price,
+            'price_annual': price_annual, # Annual total price
+            'monthly_per_month_display': monthly_display_price,
+            'annual_per_month_display': int(round(annual_display_price_per_month)),
+        }
+
+        # IMPORTANT: Use the WEB_AUTH_TOKEN and a unique token in the JS for the purchase API
+        WEB_AUTH_TOKEN_ENCODED = WEB_AUTH_TOKEN
+        
+    except Exception as e:
+        logging.error(f"Error handling renewal link for {phone}: {e}")
+        return "<p>❌ An internal error occurred while processing your renewal link.</p>", 500
+    finally:
+        local_session.close()
+
+    # --- Render HTML for Renewal Page ---
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TriageAI - Renew License</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; text-align: center; }}
+        .container {{ width: 90%; max-width: 600px; margin: 50px auto; padding: 30px; background-color: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
+        h1 {{ color: #075E54; }}
+        .details p {{ margin: 5px 0; text-align: left; }}
+        .details strong {{ color: #128C7E; }}
+        .pricing-toggle {{ margin: 20px 0; }}
+        .price {{ font-size: 2.0em; font-weight: bold; color: #128C7E; margin: 10px 0; }}
+        .start-btn {{ display: block; width: 100%; padding: 12px; background-color: #25D366; color: white; text-align: center; border: none; border-radius: 5px; cursor: pointer; font-size: 1.2em; margin-top: 20px; transition: background-color 0.3s; }}
+        .start-btn:hover {{ background-color: #1DA851; }}
+        .monthly-card, .annual-card {{ padding: 15px; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }}
+        .selected-plan {{ border-color: #128C7E !important; background-color: #e6ffed; }}
+        .modal {{ display: none; position: fixed; z-index: 10; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }}
+        .modal-content {{ background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 10px; text-align: center; }}
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>TriageAI License Renewal</h1>
+    <div class="details">
+        <p>Company: <strong>{renewal_data['name']}</strong></p>
+        <p>Admin Name: <strong>{renewal_data['wa_admin_name']}</strong></p>
+        <p>WhatsApp Admin: <strong>{renewal_data['phone']}</strong></p>
+        <p>Current Plan: <strong>{renewal_data['plan_name']}</strong></p>
+        <p>Expiration Date: <strong>{renewal_data['expired_at']}</strong></p>
+    </div>
+
+    <div class="pricing-toggle">
+        <h2>Select Renewal Duration</h2>
+        
+        <div id="monthlyPlan" class="monthly-card selected-plan" onclick="selectDuration('monthly')">
+            <h3>Monthly Renewal</h3>
+            <p style="font-size:0.8em; color:#888;">Monthly Rate</p>
+            <div class="price">₹{renewal_data['price_monthly']}<span style="font-size:0.5em;">/mo</span></div>
+        </div>
+
+        <div id="annualPlan" class="annual-card" onclick="selectDuration('annual')">
+            <h3>Annual Renewal (Save 2 Months)</h3>
+            <p style="font-size:0.8em; color:#888;">Equivalent to ₹{renewal_data['annual_per_month_display']}/month</p>
+            <div class="price">₹{renewal_data['price_annual']}<span style="font-size:0.5em;">/yr total</span></div>
+        </div>
+    </div>
+    
+    <button class="start-btn" id="renewBtn" onclick="simulateRenewalPayment()">Proceed to Pay: <span id="paymentSummary">₹{renewal_data['price_monthly']} (Monthly)</span></button>
+</div>
+
+<div id="successModal" class="modal">
+    <div class="modal-content">
+        <h2>🎉 Payment Successful!</h2>
+        <p>Your TriageAI license has been successfully renewed.</p>
+        <p>You will receive a confirmation message on your WhatsApp shortly.</p>
+        <button class="start-btn" onclick="document.getElementById('successModal').style.display = 'none'; window.location.href = '/';" style="width: auto;">Close & Back to Main</button>
+    </div>
+</div>
+
+<script>
+    let renewalState = {{ 
+        "duration": "monthly", 
+        "token": "{token}",
+        "phone": "{phone}",
+        "basePlan": "{renewal_data['base_plan']}",
+        "priceMonthly": {renewal_data['price_monthly']},
+        "priceAnnual": {renewal_data['price_annual']},
+    }};
+
+    function selectDuration(duration) {{
+        renewalState.duration = duration;
+        document.getElementById('monthlyPlan').classList.remove('selected-plan');
+        document.getElementById('annualPlan').classList.remove('selected-plan');
+        
+        let price, label;
+        if (duration === 'monthly') {{
+            document.getElementById('monthlyPlan').classList.add('selected-plan');
+            price = renewalState.priceMonthly;
+            label = `₹\${{price}} (Monthly)`;
+        }} else {{
+            document.getElementById('annualPlan').classList.add('selected-plan');
+            price = renewalState.priceAnnual;
+            label = `₹\${{price}} (Annual Total)`;
+        }}
+        document.getElementById('paymentSummary').textContent = label;
+    }}
+
+    async function simulateRenewalPayment() {{
+        document.getElementById('renewBtn').disabled = true;
+        document.getElementById('renewBtn').textContent = 'Processing Payment...';
+
+        alert("Simulating successful payment for renewal...");
+        
+        // Determine the backend key for the chosen duration
+        const backendKey = renewalState.basePlan + (renewalState.duration === 'monthly' ? '_monthly' : '_annual');
+        
+        // Handle individual plan key which is just 'individual'
+        if (renewalState.basePlan === 'individual') {{
+             backendKey = 'individual';
+        }}
+        
+        try {{
+            const response = await fetch('/api/renewal_purchase', {{
+                method: 'POST',
+                headers: {{"Content-Type": "application/json", "Authorization": "Bearer {WEB_AUTH_TOKEN_ENCODED}"}},
+                body: JSON.stringify({{
+                    "token": renewalState.token, // Send token for validation
+                    "phone": renewalState.phone, // Send phone as safeguard
+                    "plan": backendKey // Send the new plan key
+                }})
+            }});
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {{
+                document.getElementById('successModal').style.display = 'block';
+                // NOTE: The token cleanup is handled in the backend upon successful renewal.
+            }} else {{
+                alert('❌ Renewal Failed: ' + result.message);
+            }}
+        }} catch (error) {{
+            console.error('Error:', error);
+            alert('An unexpected error occurred during renewal purchase.');
+        }} finally {{
+            document.getElementById('renewBtn').disabled = false;
+            document.getElementById('renewBtn').textContent = 'Proceed to Pay: ' + document.getElementById('paymentSummary').textContent;
+        }}
+    }}
+</script>
+
+</body>
+</html>
+    """
+    return html_content
+
+@APP.route('/api/renewal_purchase', methods=['POST'])
+def api_renewal_purchase():
+    """Handles mock payment success for license renewal -> License update."""
+    auth_header = request.headers.get('Authorization')
+    if auth_header != f'Bearer {WEB_AUTH_TOKEN}':
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+    data = request.json
+    token = data.get('token')
+    plan_key = data.get('plan') # This is the full key like '5user_monthly'
+    phone = _sanitize_wa_id(data.get('phone', ''))
+
+    # 1. Validate Renewal Token
+    if token not in RENEWAL_TOKEN_STORE or RENEWAL_TOKEN_STORE[token]['phone'] != phone:
+         return jsonify({"status": "error", "message": "Invalid or expired renewal session."}), 403
+    
+    token_data = RENEWAL_TOKEN_STORE[token]
+    if datetime.now(TIMEZONE) - token_data['timestamp'] > RENEWAL_TOKEN_TIMEOUT:
+        # Purge expired token
+        if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
+        return jsonify({"status": "error", "message": "Renewal session expired."}), 403
+
+    plan_details = PLANS.get(plan_key)
+
+    if not plan_details:
+        return jsonify({"status": "error", "message": "Invalid plan key"}), 400
+
+    web_session = Session()
+    new_expiry_date = None # Initialize outside try
+    plan_label = ""
+    try:
+        # 2. Locate Admin/Company
+        agent = web_session.query(Agent).filter(Agent.user_id == phone, Agent.is_admin == True).first()
+        if not agent or not agent.company_id:
+            return jsonify({"status": "error", "message": "User not a valid Admin."}), 403
+            
+        company = web_session.query(Company).get(agent.company_id)
+        license = company.license
+        
+        if not license:
+            return jsonify({"status": "error", "message": "No license found for this company."}), 404
+
+        # 3. Update/Renew License
+        
+        # If renewing an expired license, start from now. If renewing an active one, extend from expiry.
+        start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
+        new_expiry_date = start_from + plan_details['duration']
+        plan_label = plan_details['label']
+        
+        license.expires_at = new_expiry_date
+        license.is_active = True
+        license.plan_name = plan_label
+        license.agent_limit = plan_details['agents'] # Update agent limit in case they changed plans
+        
+        web_session.commit()
+        
+        # 4. Send WhatsApp Renewal Message (Async)
+        threading.Thread(
+            target=_send_admin_renewal_message_sync,
+            args=(phone, plan_label, new_expiry_date)
+        ).start()
+        
+        # 5. Cleanup renewal token
+        if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
+
+
+        return jsonify({"status": "success", "message": "Renewal successful. License updated."}), 200
+
+    except Exception as e:
+        web_session.rollback()
+        logging.error(f"Error processing renewal purchase: {e}")
+        return jsonify({"status": "error", "message": "Internal server error."}), 500
+    finally:
+        web_session.close()
+
+
 @APP.route('/api/register', methods=['POST'])
 def api_register():
     """Step 1: Save profile, generate OTP, send mock message."""
@@ -2052,6 +2364,9 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
             _cmd_add_note_sync(sender_wa_id, arg)
         elif command == '/savelead': 
             _process_incoming_lead_sync(sender_wa_id, arg)
+        elif command == '/register':
+             # New users hitting /register explicitly go to the web purchase page
+            send_whatsapp_message(sender_wa_id, f"🔗 To register and purchase a new license, please visit our secure portal: 🌐 https://triageai.online/")
         else:
             send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
     finally:
@@ -2125,13 +2440,34 @@ def _cmd_help_sync(user_id: str):
         finally:
              local_session.close()
     
-    licensing_commands = (
-        "### 🔑 *Account Management (Available to All)*\n"
-        "• View license status: `/licensesetup`\n"
-        "• Activate a license key: `/activate [KEY]`\n"
-        "• Renew/Purchase license: `/renew`\n"
-        "• Full command list: `/start`\n"
-    )
+    # Updated licensing flow logic
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    licensing_commands = ""
+    
+    if is_admin and not is_active:
+         # Expired Admin sees /renew
+         licensing_commands = (
+            "### 🔑 *Account Management*\n"
+            "• View license status: `/licensesetup`\n"
+            "• **Renew your expired license:** `/renew`\n"
+         )
+    elif not company_id:
+         # New/Individual user sees /register (link to purchase site) and /activate (for key)
+         licensing_commands = (
+            "### 🔑 *Account Management*\n"
+            "• Purchase new license: `/register`\n"
+            "• Activate a license key: `/activate [KEY]`\n"
+            "• View license status: `/licensesetup`\n"
+         )
+    else:
+         # Active Admin/Agent sees status/activate/renew
+         licensing_commands = (
+            "### 🔑 *Account Management*\n"
+            "• View license status: `/licensesetup`\n"
+            "• Activate a license key: `/activate [KEY]`\n"
+            "• Renew subscription: `/renew`\n"
+         )
+
     
     welcome_text = (
         f"👋 *TriageAI Command Tags List*\n\n"
@@ -2154,8 +2490,10 @@ def _cmd_start_sync(user_id: str):
         f"I am your AI assistant, ready to capture and manage all your leads and follow-ups instantly.\n\n"
     )
 
-    if not is_active:
-        welcome_text += "⚠️ *Individual/Inactive Setup.* Use `/activate [key]` to join a company or use the website for purchase. Send `/renew` or `/licensesetup` for details.\n\n"
+    if not is_active and company_id and is_admin:
+         welcome_text += "⚠️ *LICENSE EXPIRED.* Send `/renew` immediately to restore access for your team.\n\n"
+    elif not is_active:
+        welcome_text += "⚠️ *Individual/Inactive Setup.* Send `/register` to purchase a new license or use `/activate [key]` to join a company. Send `/licensesetup` for details.\n\n"
     elif is_active and company_id and is_admin:
         welcome_text += "👑 *TriageAI Multi-Agent Admin Setup Active.*\n\n"
     elif is_active and company_id and not is_admin:
@@ -2402,7 +2740,7 @@ def _cmd_license_setup_sync(user_id: str):
             company = local_session.query(Company).get(company_id)
             license = company.license
 
-            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
+            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
 
             message = (
@@ -2414,8 +2752,10 @@ def _cmd_license_setup_sync(user_id: str):
                 f"• *Expires:* {expiry_str}"
             )
             
-            if not is_active:
-                 message += f"\n\n🚨 *ACTION REQUIRED:* Your license has expired. Send `/renew` to get the payment link or visit: 🌐 `{WEBSITE_URL}`"
+            if not is_active and is_admin:
+                 message += f"\n\n🚨 *ACTION REQUIRED:* Your license has expired. Send `/renew` to get the payment link."
+            elif not is_active:
+                 message += f"\n\n⚠️ *LICENSE INACTIVE:* Your company license has expired. Please contact your administrator."
                  
             send_whatsapp_message(user_id, message)
             return
@@ -2424,7 +2764,7 @@ def _cmd_license_setup_sync(user_id: str):
             user_id,
             f"💳 *Purchase a TriageAI License*\n\n"
             f"You do not have an active license. To purchase or join a company:\n"
-            f"1. *PURCHASE:* Visit our secure portal and purchase a plan: 🌐 `{WEBSITE_URL}` (Send `/renew`)\n"
+            f"1. *PURCHASE:* Send `/register` to visit our secure portal: 🌐 `{WEBSITE_URL}`\n"
             f"2. *JOIN:* Ask your company admin for a license key.\n\n"
             f"Once you receive your key, use `/activate [KEY]`."
         )
@@ -2432,41 +2772,51 @@ def _cmd_license_setup_sync(user_id: str):
         local_session.close()
         
 def _cmd_renew_sync(user_id: str):
-    """Provides the link to the web purchase page for license renewal/purchase."""
-    
-    WEBSITE_URL = "https://triageai.online/"
-    # Check if they are tied to a company (admin) or not (new customer)
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    if company_id and is_admin:
-        local_session = Session()
-        try:
+    """
+    Provides the personalized link for license renewal to expired/active admins. 
+    Directs new users to /register.
+    """
+    WEBSITE_URL = "https://triageai.online/" # Base URL
+
+    local_session = Session()
+    try:
+        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+        
+        if company_id and is_admin:
             company = local_session.query(Company).get(company_id)
             license = company.license
             
-            status = 'Active' if is_active else 'Expired'
-            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
+            # Admins (Expired or Active) get the renewal link. 
+            # Note: Active admins get it but might be warned it's not due yet on the webpage.
+            
+            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A'
+            status_text = '✅ ACTIVE' if is_active else '❌ EXPIRED'
+
+            # --- RENEWAL PATH (Existing Admin) ---
+            renewal_token = generate_renewal_token(user_id)
+            renewal_link = f"{WEBSITE_URL}renew_link/{renewal_token}"
             
             message = (
-                f"💳 *TriageAI License Renewal*\n"
+                f"💳 *TriageAI License Renewal Link*\n"
                 f"Company: {company.name}\n"
                 f"Your plan: *{license.plan_name}*\n"
-                f"Status: {status} (Expires: {expiry_str})\n\n"
-                f"To renew your license, please visit our secure portal:\n"
-                f"🌐 `{WEBSITE_URL}` (Please log in with your Admin WhatsApp number for renewal.)"
+                f"Status: {status_text} (Expires: {expiry_str})\n\n"
+                f"To complete your renewal payment, click the link below (valid for 15 minutes):\n"
+                f"🌐 *{renewal_link}*\n\n"
+                f"Note: This link is personalized to you. Do not share it."
             )
             send_whatsapp_message(user_id, message)
-        finally:
-            local_session.close()
-    else:
-         # Non-paying user or agent trying to buy a license
-        send_whatsapp_message(
-            user_id,
-            f"💳 *TriageAI Purchase/Renewal*\n\n"
-            f"To purchase a new license key or start your subscription, please visit our secure portal:\n"
-            f"🌐 `{WEBSITE_URL}`\n\n"
-            f"Once purchased, use `/activate [KEY]` to start."
-        )
+            
+        else:
+             # Non-Admin, Non-Licensed, or Agent trying to buy a new license (New User Flow)
+            send_whatsapp_message(
+                user_id,
+                f"💳 *TriageAI Registration/Purchase*\n\n"
+                f"You do not have an Admin license. To purchase a new subscription and register your company, please send `/register` or visit:\n"
+                f"🌐 `{WEBSITE_URL}`"
+            )
+    finally:
+        local_session.close()
 
 def _cmd_activate_sync(user_id: str, key_input: str):
     local_session = Session()
@@ -3186,6 +3536,37 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         local_session.rollback()
         logging.error(f"Error processing incoming TriageAI lead: {e}")
         send_whatsapp_message(user_id, "❌ An internal error occurred while saving the lead.")
+    finally:
+        local_session.close()
+
+def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: datetime):
+    """
+    Sends the final renewal message to the admin after payment.
+    """
+    local_session = Session()
+    try:
+        profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
+        company = local_session.query(Company).filter(Company.admin_user_id == phone).first()
+        
+        if not profile or not company:
+             logging.error(f"❌ Failed to load UserProfile/Company {phone} in renewal thread.")
+             return
+
+        # DB stores naive UTC, localize to UTC, then convert to IST for display
+        expiry_dt_ist = pytz.utc.localize(expiry_date).astimezone(TIMEZONE)
+        expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y')
+
+        message = (
+            f"Renewal Successful, *{profile.name}*! 🎉\n\n"
+            f"Your *{plan_name}* plan for *{company.name}* has been successfully renewed.\n"
+            f"New Expiry Date: *{expiry_str} IST*\n\n"
+            f"Your team can continue to use all TriageAI features. Thank you for renewing!"
+        )
+        send_whatsapp_message(phone, message)
+        
+    except Exception as e:
+        logging.error(f"❌ Error in _send_admin_renewal_message_sync for {phone}: {e}")
+        logging.error(traceback.format_exc())
     finally:
         local_session.close()
 
