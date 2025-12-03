@@ -1121,7 +1121,11 @@ def format_pipeline_text(user_id: str) -> str:
 @APP.route('/')
 def pricing_page():
     """Renders the single-page pricing and signup HTML."""
-    # This route serves the responsive HTML/CSS/JS for the website flow.
+    # NOTE: The NameError was caused by unescaped $ in JS template literals within the Python f-string.
+    # The fix is to change ${...} to \${...} in the JS code inside this Python string.
+    # E.g., ${checkoutState.phone} becomes \${checkoutState.phone}.
+
+    WEBSITE_URL = "https://triageai.online/"
     html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -1419,7 +1423,8 @@ def pricing_page():
             const result = await response.json();
             
             if (result.status === 'success') {{
-                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
+                // FIX: Escape nested template literal here
+                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>\${checkoutState.phone}</strong>.`;
                 startOtpTimer();
             }} else {{
                 alert('Resend Failed: ' + result.message);
@@ -1437,7 +1442,8 @@ def pricing_page():
     
     function openOtpModal(phone) {{
         document.getElementById('otpPhoneDisplay').textContent = phone;
-        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
+        // FIX: Escape nested template literal here
+        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>\${phone}</strong>. Check your WhatsApp.`;
         document.getElementById('otpCode').value = ''; // Clear previous OTP
         document.getElementById('otpModal').style.display = 'block';
         startOtpTimer(); // Start the timer when the modal opens
@@ -1508,7 +1514,7 @@ def pricing_page():
                 }}, 1000); // 1 second delay
                 
             }} else {{
-                document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
+                document.getElementById('otpMsg').innerHTML = `❌ \${result.message}`;
             }}
         }} catch (error) {{
             console.error('Error:', error);
@@ -1542,6 +1548,7 @@ def pricing_page():
                 
                 document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
                 document.getElementById('paymentAgents').textContent = planDetails.agents;
+                // FIX: Escape nested template literal here
                 document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price + (checkoutState.duration === 'annual' ? ' (Annual Total)' : ' (Monthly)');
 
                 document.getElementById('paymentModal').style.display = 'block';
@@ -1572,7 +1579,7 @@ def pricing_page():
             if (result.status === 'success') {{
                 alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
                 closeModal('paymentModal');
-                window.location.href = '/'; // Go back to the main page or success page
+                window.location.href = '{WEBSITE_URL}'; // Go back to the main page or success page
             }} else {{
                 alert('❌ License Activation Failed: ' + result.message);
             }}
@@ -1959,10 +1966,29 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
     command = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
     
-    # Standardize command to remove space for parsing consistency
-    if command == '/my':
-        command = f'/{arg.split()[0].lower()}'
-        arg = arg.split(maxsplit=1)[1] if len(arg.split()) > 1 else ""
+    # Standardize command to remove space for parsing consistency (e.g., /my leads -> /myleads)
+    # This also handles /add note [id] [text] -> /addnote [id] [text]
+    if command in ['/my', '/add', '/set']:
+        if len(parts) > 1:
+            sub_command_parts = arg.split(maxsplit=1)
+            sub_command = sub_command_parts[0].lower()
+            
+            if command == '/my' and sub_command in ['leads', 'followups']:
+                 command = f'/my{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/add' and sub_command == 'note':
+                 command = '/addnote'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/set' and sub_command in ['followup']:
+                 command = '/setfollowup'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            # Handle /followupdone/cancel/reschedule/setfollowup as specific tags
+            elif command == '/followup' and sub_command in ['done', 'cancel', 'reschedule']:
+                 command = f'/followup{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/save' and sub_command == 'lead':
+                 command = '/savelead'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
 
     local_session = Session()
     try:
@@ -1980,7 +2006,7 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
         elif command == '/debugjobs':
             _cmd_debug_jobs_sync(sender_wa_id)
 
-        # Commands restricted to Active License holders
+        # Commands restricted to Active License holders (Note: Handlers contain the check)
         elif command == '/myfollowups':
             _next_followups_cmd_sync(sender_wa_id)
         elif command == '/myleads': 
@@ -2018,12 +2044,13 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
                  _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}")
         elif command == '/status':
             _status_update_cmd_sync(sender_wa_id, arg)
-        elif command.startswith('/followup'): # Covers /followup, /setfollowup, /followupdone, /followupcancel, /followupreschedule
+        elif command in ['/setfollowup', '/followupdone', '/followupcancel', '/followupreschedule']:
+            # Pass the full command to the generic handler
             _handle_followup_cmd_sync(sender_wa_id, message_body)
-        elif command == '/add' and arg.startswith('note'): # Handles /add note [id] [text]
-            _cmd_add_note_sync(sender_wa_id, arg.replace('note', '', 1).strip())
-        elif command == '/save' and arg.startswith('lead'): # Handles /save lead <details>
-            _process_incoming_lead_sync(sender_wa_id, arg.replace('lead', '', 1).strip())
+        elif command == '/addnote':
+            _cmd_add_note_sync(sender_wa_id, arg)
+        elif command == '/savelead': 
+            _process_incoming_lead_sync(sender_wa_id, arg)
         else:
             send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
     finally:
@@ -2078,15 +2105,24 @@ def _cmd_help_sync(user_id: str):
 
     admin_commands = ""
     if is_admin and is_active:
-        admin_commands = (
-            "### 👑 *Admin Management (Requires Admin Status)*\n"
-            "• Check agent slots: `/remainingslots`\n"
-            "• Add a new agent: `/addagent [WA Phone No.]`\n"
-            "• Remove an agent: `/removeagent [WA Phone No.]`\n"
-            "• See team leads/pipeline: `/teamleads`\n"
-            "• See team followups: `/teamfollowups`\n"
-            "• Set company name: `/setcompanyname [Name]`\n"
-        )
+        local_session = Session()
+        try:
+             company = local_session.query(Company).get(company_id)
+             license = company.license
+             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
+             limit = license.agent_limit if license else 1
+             
+             admin_commands = (
+                 "### 👑 *Admin Management (Requires Admin Status)*\n"
+                 f"• Check agent slots: `/remainingslots` (Current: {current_agents}/{limit})\n"
+                 "• Add a new agent: `/addagent [WA Phone No.]`\n"
+                 "• Remove an agent: `/removeagent [WA Phone No.]`\n"
+                 "• See team leads/pipeline: `/teamleads`\n"
+                 "• See team followups: `/teamfollowups`\n"
+                 "• Set company name: `/setcompanyname [Name]`\n"
+             )
+        finally:
+             local_session.close()
     
     licensing_commands = (
         "### 🔑 *Account Management (Available to All)*\n"
@@ -2137,8 +2173,11 @@ def _cmd_start_sync(user_id: str):
 
     # --- Admin Commands ---
     if is_admin and is_active:
-        current_agents = session.query(Agent).filter(Agent.company_id == company_id).count()
-        limit = session.query(Company).get(company_id).license.agent_limit if company_id else 1
+        local_session = Session()
+        current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
+        limit = local_session.query(Company).get(company_id).license.agent_limit if company_id else 1
+        local_session.close()
+
         welcome_text += "### 👑 *Admin Management*\n"
         welcome_text += f"• `/remainingslots`: Check agent limits ({current_agents}/{limit}).\n"
         welcome_text += "• `/addagent [WA Phone No.]`: Add a new agent (requires OTP verification).\n"
@@ -2356,6 +2395,7 @@ def _cmd_license_setup_sync(user_id: str):
     local_session = Session()
     try:
         _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+        WEBSITE_URL = "https://triageai.online/"
 
         if company_id:
             company = local_session.query(Company).get(company_id)
@@ -2374,7 +2414,7 @@ def _cmd_license_setup_sync(user_id: str):
             )
             
             if not is_active:
-                 message += f"\n\n🚨 *ACTION REQUIRED:* Your license has expired. Send `/renew` to get the payment link."
+                 message += f"\n\n🚨 *ACTION REQUIRED:* Your license has expired. Send `/renew` to get the payment link or visit: 🌐 `{WEBSITE_URL}`"
                  
             send_whatsapp_message(user_id, message)
             return
@@ -2383,7 +2423,7 @@ def _cmd_license_setup_sync(user_id: str):
             user_id,
             f"💳 *Purchase a TriageAI License*\n\n"
             f"You do not have an active license. To purchase or join a company:\n"
-            f"1. *PURCHASE:* Visit our secure portal and purchase a plan: 🌐 `http://yourdomain.com/` (Send `/renew`)\n"
+            f"1. *PURCHASE:* Visit our secure portal and purchase a plan: 🌐 `{WEBSITE_URL}` (Send `/renew`)\n"
             f"2. *JOIN:* Ask your company admin for a license key.\n\n"
             f"Once you receive your key, use `/activate [KEY]`."
         )
@@ -2393,6 +2433,7 @@ def _cmd_license_setup_sync(user_id: str):
 def _cmd_renew_sync(user_id: str):
     """Provides the link to the web purchase page for license renewal/purchase."""
     
+    WEBSITE_URL = "https://triageai.online/"
     # Check if they are tied to a company (admin) or not (new customer)
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
     
@@ -2411,7 +2452,7 @@ def _cmd_renew_sync(user_id: str):
                 f"Your plan: *{license.plan_name}*\n"
                 f"Status: {status} (Expires: {expiry_str})\n\n"
                 f"To renew your license, please visit our secure portal:\n"
-                f"🌐 `http://yourdomain.com/` (Please log in with your Admin WhatsApp number for renewal.)"
+                f"🌐 `{WEBSITE_URL}` (Please log in with your Admin WhatsApp number for renewal.)"
             )
             send_whatsapp_message(user_id, message)
         finally:
@@ -2422,7 +2463,7 @@ def _cmd_renew_sync(user_id: str):
             user_id,
             f"💳 *TriageAI Purchase/Renewal*\n\n"
             f"To purchase a new license key or start your subscription, please visit our secure portal:\n"
-            f"🌐 `http://yourdomain.com/`\n\n"
+            f"🌐 `{WEBSITE_URL}`\n\n"
             f"Once purchased, use `/activate [KEY]` to start."
         )
 
