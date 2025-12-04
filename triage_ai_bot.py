@@ -101,7 +101,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 # --- DUMMY PAYMENT CONFIG ---
 PLANS = {
-    # Individual Plan: 1 agent
+    # Individual Plan: 1 agent (Monthly only, annual price displayed is discounted monthly rate)
     "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent) Monthly"},
     # 5-User Plan: Maps 5user monthly/annual keys from frontend
     "5user_monthly": {"agents": 5, "price": 1495, "duration": timedelta(days=30), "label": "5-User Team Monthly"},
@@ -1181,20 +1181,34 @@ def renew_link_handler(token: str):
             'individual' # Default to individual if somehow misaligned
         )
         
-        if full_plan_key.endswith('_monthly'):
+        # === FIX: Correctly extract base plan key, handling individual case ===
+        if full_plan_key == 'individual':
+             base_plan_key = 'individual'
+        elif full_plan_key.endswith('_monthly'):
              base_plan_key = full_plan_key.replace('_monthly', '')
         elif full_plan_key.endswith('_annual'):
              base_plan_key = full_plan_key.replace('_annual', '')
         else:
-             base_plan_key = full_plan_key
+             # This handles old license keys that might not match the current PLANS map exactly
+             base_plan_key = 'individual'
 
         
         # Look up price info for the monthly/annual equivalent of the base plan
-        monthly_plan = PLANS.get(f'{base_plan_key}_monthly', PLANS['individual'])
-        annual_plan = PLANS.get(f'{base_plan_key}_annual', monthly_plan) # Fallback to monthly if annual is missing
+        # Fetch data for MONTHLY and ANNUAL pricing based on the *base* key
+        monthly_plan_key = f'{base_plan_key}_monthly' if base_plan_key != 'individual' else 'individual'
+        annual_plan_key = f'{base_plan_key}_annual' if base_plan_key != 'individual' else 'individual'
         
-        price_monthly = monthly_plan['price']
-        price_annual = annual_plan['price']
+        monthly_plan = PLANS.get(monthly_plan_key, PLANS['individual'])
+        annual_plan = PLANS.get(annual_plan_key, monthly_plan) 
+        
+        # If it's the simple 'individual' plan, monthly/annual keys are the same, but we calculate prices
+        if base_plan_key == 'individual':
+             price_monthly = PLANS['individual']['price']
+             # Simulate the annual price based on the front-end display logic (249 * 12)
+             price_annual = 249 * 12
+        else:
+             price_monthly = monthly_plan['price']
+             price_annual = annual_plan['price']
         
         # Mocking the discounted display price for the frontend (reverse calculation)
         monthly_display_price = price_monthly
@@ -1239,8 +1253,7 @@ def api_renewal_purchase():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
-    token = data.get('token')
-    plan_key = data.get('plan') # This is the full key like '5user_monthly'
+    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
     # 1. Validate Renewal Token
@@ -1253,6 +1266,7 @@ def api_renewal_purchase():
         if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
         return jsonify({"status": "error", "message": "Renewal session expired."}), 403
 
+    # === FIX: Ensure we use the correct PLAN details based on the full key (e.g., 5user_annual) ===
     plan_details = PLANS.get(plan_key)
 
     if not plan_details:
@@ -1424,9 +1438,10 @@ def api_purchase():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
-    plan_key = data.get('plan') # This is the full key like '5user_monthly'
+    plan_key = data.get('plan') # This is the full key like '5user_monthly' or '5user_annual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
+    # === FIX: Use the plan_key directly for details lookup ===
     plan_details = PLANS.get(plan_key)
 
     if not plan_details:
@@ -1452,8 +1467,7 @@ def api_purchase():
         if existing_agent and existing_agent.is_admin:
              return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
         
-        # Scenario 2: User is an agent but not linked (individual) - proceed to create new company
-        # Scenario 3: User is not in Agent table - proceed to create new company
+        # Scenario 2 & 3: Proceed to create new company
         
         new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]  # Generate license key
         expiry_date = datetime.utcnow() + plan_details['duration']
@@ -2171,6 +2185,8 @@ def _cmd_renew_sync(user_id: str):
     """
     Provides the personalized link for license renewal to expired/active admins. 
     Directs new users to /register.
+    
+    FIXED: Handles individual users who are admins of their one-person company.
     """
     WEBSITE_URL = "https://triageai.online/" # Base URL
 
@@ -2178,17 +2194,16 @@ def _cmd_renew_sync(user_id: str):
     try:
         _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
         
+        # Check if the user is linked to ANY company and is the admin
         if company_id and is_admin:
             company = local_session.query(Company).get(company_id)
             license = company.license
             
-            # Admins (Expired or Active) get the renewal link. 
-            # Note: Active admins get it but might be warned it's not due yet on the webpage.
-            
+            # Admins (Expired or Active) get the renewal link.
             expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A'
             status_text = '✅ ACTIVE' if is_active else '❌ EXPIRED'
 
-            # --- RENEWAL PATH (Existing Admin) ---
+            # --- RENEWAL PATH (Existing Admin/Individual Admin) ---
             renewal_token = generate_renewal_token(user_id)
             renewal_link = f"{WEBSITE_URL}renew_link/{renewal_token}"
             
