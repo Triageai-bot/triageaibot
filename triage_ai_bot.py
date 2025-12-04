@@ -499,32 +499,36 @@ def hash_user_id(user_id: str) -> str:
     """Non-reversible hash of WhatsApp ID for secure reporting/external ID."""
     return hashlib.sha256(str(user_id).encode()).hexdigest()[:10]
 
-def get_user_leads_query(user_id: str, scope: str = 'personal'):
+# --- FIX 4: get_user_leads_query to use local_session ---
+def get_user_leads_query(user_id: str, scope: str = 'personal', local_session=None):
     """
     Retrieves the base Lead query based on RBAC and desired scope.
     'personal' scope is for /myleads, 'team' scope is for /teamleads.
     """
+    if local_session is None:
+        local_session = session  # Fallback to global session (Discouraged for threads)
+        
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
     # BUGFIX 1: Restrict personal commands to personal leads even if user is admin
     if scope == 'personal' or not (is_active and is_admin and company_id):
         # Non-admins or un-licensed/individual users (and all users for /myleads) only see their own leads
         logging.info(f"🔍 TriageAI Query: Using personal leads query for {user_id}")
-        return session.query(Lead).filter(Lead.user_id == user_id)
+        return local_session.query(Lead).filter(Lead.user_id == user_id)
     
     # Team scope (only for active admins)
     elif scope == 'team' and is_active and is_admin and company_id:
         # Admins see all leads for their company's agents
-        company_agents = session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
+        company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
         agent_ids = [agent[0] for agent in company_agents]
         logging.info(f"🔍 TriageAI Query: Using team leads query for company {company_id} ({len(agent_ids)} agents)")
         # CRITICAL: This query is used for team commands and reports.
-        return session.query(Lead).filter(Lead.user_id.in_(agent_ids))
+        return local_session.query(Lead).filter(Lead.user_id.in_(agent_ids))
     
     else:
         # Fallback to personal if scope is team but user isn't an active admin.
         logging.info(f"🔍 TriageAI Query: Falling back to personal leads query for {user_id} (Admin check failed)")
-        return session.query(Lead).filter(Lead.user_id == user_id)
+        return local_session.query(Lead).filter(Lead.user_id == user_id)
 
 
 def extract_lead_data(text: str):
@@ -568,25 +572,30 @@ def extract_lead_data(text: str):
 
 def check_duplicate(phone: str, user_id: str):
     """Checks for duplicate leads by phone, respecting RBAC."""
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    # Use a new local session for this read operation
+    local_session = Session()
+    try:
+        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-    phone = re.sub(r'\D', '', phone)
+        phone = re.sub(r'\D', '', phone)
 
-    if is_active and company_id:
-        # Company Agents check the entire company's leads
-        company_agents = session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
-        agent_ids = [agent[0] for agent in company_agents]
+        if is_active and company_id:
+            # Company Agents check the entire company's leads
+            company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
+            agent_ids = [agent[0] for agent in company_agents]
 
-        return session.query(Lead).filter(
-            Lead.user_id.in_(agent_ids),
-            Lead.phone == phone
-        ).first()
-    else:
-        # Individual agents only check their own leads
-        return session.query(Lead).filter(
-            Lead.user_id == user_id,
-            Lead.phone == phone
-        ).first()
+            return local_session.query(Lead).filter(
+                Lead.user_id.in_(agent_ids),
+                Lead.phone == phone
+            ).first()
+        else:
+            # Individual agents only check their own leads
+            return local_session.query(Lead).filter(
+                Lead.user_id == user_id,
+                Lead.phone == phone
+            ).first()
+    finally:
+        local_session.close()
 
 # ==============================
 # 5. SCHEDULER LOGIC
@@ -722,7 +731,7 @@ def daily_summary_job_sync():
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
             # NOTE: Daily summary uses the TEAM scope if available, otherwise personal.
-            base_query = get_user_leads_query(user_id, scope='team' if is_admin else 'personal')
+            base_query = get_user_leads_query(user_id, scope='team' if is_admin else 'personal', local_session=local_session)
 
             data = base_query.filter(
                 Lead.created_at >= start_of_today_utc
@@ -817,6 +826,7 @@ def _check_overdue_followups_sync():
 # 6. REPORTING UTILS
 # ==============================
 
+# --- FIX 3: get_report_filters with robust date parsing ---
 def get_report_filters(query: str) -> Dict[str, Any]:
     """Implements explicit date parsing, shortcuts, and AI parsing for the query."""
     now_ist = datetime.now(TIMEZONE)
@@ -837,7 +847,8 @@ def get_report_filters(query: str) -> Dict[str, Any]:
 
     # --- CRITICAL: Handle Explicit Date Range Format FIRST: "YYYY-MM-DD to YYYY-MM-DD" ---
     if ' to ' in query_lower:
-        date_pattern = r'(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})'
+        # More flexible pattern to handle single-digit months/days (though YYYY-MM-DD is preferred)
+        date_pattern = r'(\d{4}-\d{1,2}-\d{1,2})\s+to\s+(\d{4}-\d{1,2}-\d{1,2})'
         match = re.search(date_pattern, query_lower)
 
         if match:
@@ -845,6 +856,7 @@ def get_report_filters(query: str) -> Dict[str, Any]:
                 start_str = match.group(1)
                 end_str = match.group(2)
 
+                # Use flexible parsing for safety, but typically the input should be YYYY-MM-DD
                 start_date_raw = datetime.strptime(start_str, '%Y-%m-%d')
                 start_date_obj = TIMEZONE.localize(start_date_raw.replace(hour=0, minute=0, second=0, microsecond=0))
 
@@ -853,6 +865,7 @@ def get_report_filters(query: str) -> Dict[str, Any]:
 
                 label = f"Custom Report ({start_str} to {end_str})"
 
+                logging.info(f"✅ Explicit date range parsed: {start_date_obj} to {end_date_obj}")
                 return {"start_date": start_date_obj, "end_date": end_date_obj, "label": label}
 
             except ValueError as e:
@@ -944,51 +957,56 @@ def get_report_filters(query: str) -> Dict[str, Any]:
     return {"start_date": start_date_obj, "end_date": end_date_obj, "label": label}
 
 
+# --- FIX 6: fetch_filtered_leads to use local_session ---
 def fetch_filtered_leads(user_id: str, filters: Dict[str, Any]) -> List[Lead]:
-    # NOTE: Reports use the team scope if the user is an active admin.
-    _, _, is_active, is_admin, _ = get_agent_company_info(user_id)
-    scope = 'team' if is_active and is_admin else 'personal'
-    query = get_user_leads_query(user_id, scope=scope)
+    local_session = Session()  # CRITICAL: Use local session
+    try:
+        # NOTE: Reports use the team scope if the user is an active admin.
+        _, _, is_active, is_admin, _ = get_agent_company_info(user_id)
+        scope = 'team' if is_active and is_admin else 'personal'
+        query = get_user_leads_query(user_id, scope=scope, local_session=local_session)
 
-    keyword = filters.get('keyword')
-    if keyword:
-        # Generic keyword search across multiple fields
-        query = query.filter(or_(
-            Lead.name.ilike(f'%{keyword}%'),
-            Lead.phone.ilike(f'%{keyword}%'),
-            Lead.note.ilike(f'%{keyword}%'),
-            Lead.status.ilike(f'%{keyword}%'),
-        ))
+        keyword = filters.get('keyword')
+        if keyword:
+            # Generic keyword search across multiple fields
+            query = query.filter(or_(
+                Lead.name.ilike(f'%{keyword}%'),
+                Lead.phone.ilike(f'%{keyword}%'),
+                Lead.note.ilike(f'%{keyword}%'),
+                Lead.status.ilike(f'%{keyword}%'),
+            ))
 
-    search_field = filters.get('search_field')
-    search_value = filters.get('search_value')
+        search_field = filters.get('search_field')
+        search_value = filters.get('search_value')
 
-    # Specific field search (used by /search [field] [value])
-    if search_field == 'name' and search_value:
-        query = query.filter(Lead.name.ilike(f'%{search_value}%'))
-    elif search_field == 'phone' and search_value:
-        query = query.filter(Lead.phone.ilike(f'%{search_value}%'))
-    elif search_field == 'status' and search_value:
-        query = query.filter(Lead.status.ilike(f'%{search_value}%'))
+        # Specific field search (used by /search [field] [value])
+        if search_field == 'name' and search_value:
+            query = query.filter(Lead.name.ilike(f'%{search_value}%'))
+        elif search_field == 'phone' and search_value:
+            query = query.filter(Lead.phone.ilike(f'%{search_value}%'))
+        elif search_field == 'status' and search_value:
+            query = query.filter(Lead.status.ilike(f'%{search_value}%'))
 
-    # Date range filtering (used by /report [timeframe])
-    start_date = filters.get('start_date')
-    end_date = filters.get('end_date')
+        # Date range filtering (used by /report [timeframe])
+        start_date = filters.get('start_date')
+        end_date = filters.get('end_date')
 
-    if start_date:
-        # Convert localized Python datetime object to naive UTC datetime
-        start_date_utc = start_date.astimezone(pytz.utc).replace(tzinfo=None)
-        logging.info(f"🔍 Filtering leads >= {start_date_utc} (UTC)")
-        query = query.filter(Lead.created_at >= start_date_utc)
-    if end_date:
-        # Convert localized Python datetime object to naive UTC datetime
-        end_date_utc = end_date.astimezone(pytz.utc).replace(tzinfo=None)
-        logging.info(f"🔍 Filtering leads <= {end_date_utc} (UTC)")
-        query = query.filter(Lead.created_at <= end_date_utc)
+        if start_date:
+            # Convert localized Python datetime object to naive UTC datetime
+            start_date_utc = start_date.astimezone(pytz.utc).replace(tzinfo=None)
+            logging.info(f"🔍 Filtering leads >= {start_date_utc} (UTC)")
+            query = query.filter(Lead.created_at >= start_date_utc)
+        if end_date:
+            # Convert localized Python datetime object to naive UTC datetime
+            end_date_utc = end_date.astimezone(pytz.utc).replace(tzinfo=None)
+            logging.info(f"🔍 Filtering leads <= {end_date_utc} (UTC)")
+            query = query.filter(Lead.created_at <= end_date_utc)
 
-    result = query.order_by(Lead.created_at.desc()).all()
-    logging.info(f"📊 Found {len(result)} leads matching filters")
-    return result
+        result = query.order_by(Lead.created_at.desc()).all()
+        logging.info(f"📊 Found {len(result)} leads matching filters")
+        return result
+    finally:
+        local_session.close()
 
 def create_report_dataframe(leads: List[Lead]) -> pd.DataFrame:
     """Creates a Pandas DataFrame for reports."""
@@ -1150,32 +1168,43 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     buffer.seek(0)
     return buffer
 
-
+# --- FIX 1 & 2: format_pipeline_text uses local_session and correct logic ---
 def format_pipeline_text(user_id: str, scope: str = 'personal') -> str:
     """Formats the current lead status counts into a text pipeline view."""
-    # NOTE: Uses the scope parameter for the correct query
-    base_query = get_user_leads_query(user_id, scope=scope)
+    local_session = Session()
+    try:
+        # Build query based on scope, using the local session
+        if scope == 'personal':
+            base_query = local_session.query(Lead).filter(Lead.user_id == user_id)
+            title = "TriageAI Personal Pipeline View"
+        else:  # team scope
+            _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+            if is_active and is_admin and company_id:
+                # Use the helper which is now updated to accept local_session
+                base_query = get_user_leads_query(user_id, scope='team', local_session=local_session)
+                title = "TriageAI Company Pipeline View"
+            else:
+                base_query = local_session.query(Lead).filter(Lead.user_id == user_id)
+                title = "TriageAI Personal Pipeline View"
 
-    data = base_query.with_entities(
-        Lead.status,
-        func.count(Lead.id)
-    ).group_by(Lead.status).all()
+        data = base_query.with_entities(
+            Lead.status,
+            func.count(Lead.id)
+        ).group_by(Lead.status).all()
 
-    counts = dict(data)
+        counts = dict(data)
 
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+        logging.info(f"📊 Pipeline counts for {user_id} ({scope}): {counts}")
 
-    title = "TriageAI Personal Pipeline View"
-    if is_active and is_admin and company_id and scope == 'team':
-        title = "TriageAI Company Pipeline View"
+        text = f"📈 *{title}*\n\n"
+        text += f"• *New Leads:* {counts.get('New', 0)}\n"
+        text += f"• *Hot Leads:* {counts.get('Hot', 0)}\n"
+        text += f"• *Follow-Up Leads:* {counts.get('Follow-Up', 0)}\n"
+        text += f"• *Converted Leads:* {counts.get('Converted', 0)}\n"
 
-    text = f"📈 *{title}*\n\n"
-    text += f"• *New Leads:* {counts.get('New', 0)}\n"
-    text += f"• *Hot Leads:* {counts.get('Hot', 0)}\n"
-    text += f"• *Follow-Up Leads:* {counts.get('Follow-Up', 0)}\n"
-    text += f"• *Converted Leads:* {counts.get('Converted', 0)}\n"
-
-    return text
+        return text
+    finally:
+        local_session.close()
 
 
 # ==============================
@@ -1757,7 +1786,7 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
     
     # Standardize command to remove space for parsing consistency (e.g., /my leads -> /myleads)
     # This also handles /add note [id] [text] -> /addnote [id] [text]
-    if command in ['/my', '/add', '/set']:
+    if command in ['/my', '/add', '/set', '/followup', '/save']:
         if len(parts) > 1:
             sub_command_parts = arg.split(maxsplit=1)
             sub_command = sub_command_parts[0].lower()
@@ -2201,6 +2230,7 @@ def _daily_summary_control_sync(user_id: str, arg: str):
     finally:
         local_session.close()
 
+# --- FIX 5: _pipeline_view_cmd_sync uses local_session ---
 def _pipeline_view_cmd_sync(user_id: str, scope: str = 'personal'):
     """Pipeline view."""
     # CRITICAL: Access Control Check
@@ -2208,6 +2238,7 @@ def _pipeline_view_cmd_sync(user_id: str, scope: str = 'personal'):
         send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
         return
         
+    # format_pipeline_text now handles its own session creation/closing
     text = format_pipeline_text(user_id, scope=scope)
     send_whatsapp_message(user_id, text)
 
@@ -2630,6 +2661,7 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
                 filter_data = {'search_field': search_type, 'search_value': search_value}
 
         # BUGFIX: Use the correct scope when fetching leads for search
+        # fetch_filtered_leads now handles its own session
         leads = fetch_filtered_leads(user_id, filter_data)[:15]
 
         if not leads:
@@ -2739,7 +2771,7 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
         filters = get_report_filters(original_query)
         timeframe_label: str = filters.get('label', 'Report')
 
-        # fetch_filtered_leads uses the global session internally
+        # fetch_filtered_leads now handles its own session internally
         leads = fetch_filtered_leads(user_id, filters)
 
         if not leads:
@@ -3024,6 +3056,8 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         )
         local_session.add(lead)
         local_session.commit()
+        # Ensure lead.id is populated for scheduling
+        local_session.refresh(lead)
 
         # 5. Schedule Reminder
         reminder_status = ""
