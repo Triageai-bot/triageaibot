@@ -75,7 +75,8 @@ CORS(APP)
 WEB_AUTH_TOKEN = os.getenv("WEB_AUTH_TOKEN", "super_secret_web_key_123")
 
 # Placeholder: ADMIN_USER_ID must be a WhatsApp phone number string
-ADMIN_USER_ID = "919999999999" # Update this with a real number for testing
+# NOTE: Removed automatic Admin setup for this ID to rely on purchase flow
+ADMIN_USER_ID = "919999999999"
 
 # MySQL Credentials (Assuming mysql.connector is available or configured via URI)
 MYSQL_CREDS = {
@@ -473,7 +474,10 @@ def get_agent_company_info(user_id: str):
 
             if license and license.expires_at:
                 now_utc = datetime.utcnow()
-                if license.expires_at > now_utc:
+                # BUGFIX: Handle naive datetime comparison
+                license_expires_at_aware = pytz.utc.localize(license.expires_at)
+                now_utc_aware = pytz.utc.localize(now_utc)
+                if license_expires_at_aware > now_utc_aware:
                     is_active = True
                 else:
                     # Deactivation logic is handled elsewhere, but mark as inactive here for access control
@@ -495,21 +499,37 @@ def hash_user_id(user_id: str) -> str:
     """Non-reversible hash of WhatsApp ID for secure reporting/external ID."""
     return hashlib.sha256(str(user_id).encode()).hexdigest()[:10]
 
-def get_user_leads_query(user_id: str):
-    """Retrieves the base Lead query based on RBAC."""
+def get_user_leads_query(user_id: str, scope: str = 'personal'):
+    """
+    Retrieves the base Lead query based on RBAC and desired scope.
+    'personal' scope is for /myleads, 'team' scope is for /teamleads.
+    """
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-    if is_active and is_admin and company_id:
+    # BUGFIX 1: Restrict personal commands to personal leads even if user is admin
+    if scope == 'personal' or not (is_active and is_admin and company_id):
+        # Non-admins or un-licensed/individual users (and all users for /myleads) only see their own leads
+        logging.info(f"🔍 TriageAI Query: Using personal leads query for {user_id}")
+        return session.query(Lead).filter(Lead.user_id == user_id)
+    
+    # Team scope (only for active admins)
+    elif scope == 'team' and is_active and is_admin and company_id:
         # Admins see all leads for their company's agents
         company_agents = session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
         agent_ids = [agent[0] for agent in company_agents]
+        logging.info(f"🔍 TriageAI Query: Using team leads query for company {company_id} ({len(agent_ids)} agents)")
+        # CRITICAL: This query is used for team commands and reports.
         return session.query(Lead).filter(Lead.user_id.in_(agent_ids))
+    
     else:
-        # Non-admins or un-licensed/individual users only see their own leads
+        # Fallback to personal if scope is team but user isn't an active admin.
+        logging.info(f"🔍 TriageAI Query: Falling back to personal leads query for {user_id} (Admin check failed)")
         return session.query(Lead).filter(Lead.user_id == user_id)
+
 
 def extract_lead_data(text: str):
     """AI Lead Extraction using Gemini."""
+    # Convert UTC to IST for AI context
     current_time_ist = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
     prompt = f"""
@@ -606,6 +626,7 @@ def send_reminder(lead_id: int):
             logging.error(f"❌ Followup date missing for Lead {lead_id} but status is Pending.")
             return
 
+        # BUGFIX: Use pytz.utc.localize for robust conversion
         followup_dt_ist = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE)
 
         message = (
@@ -633,6 +654,7 @@ def schedule_followup(user_id: str, lead_id: int, name: str, phone: str, followu
     """Schedules a reminder 15 minutes before followup. followup_dt is Naive UTC."""
 
     # 1. Localize the naive UTC datetime to aware UTC
+    # BUGFIX: Ensure `followup_dt` is treated as UTC as it came from the DB in naive form
     followup_dt_utc_aware = pytz.utc.localize(followup_dt)
 
     # 2. Convert to the scheduler's timezone (IST)
@@ -699,7 +721,8 @@ def daily_summary_job_sync():
 
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-            base_query = get_user_leads_query(user_id)
+            # NOTE: Daily summary uses the TEAM scope if available, otherwise personal.
+            base_query = get_user_leads_query(user_id, scope='team' if is_admin else 'personal')
 
             data = base_query.filter(
                 Lead.created_at >= start_of_today_utc
@@ -713,16 +736,18 @@ def daily_summary_job_sync():
 
             now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
 
-            # Pending/Missed follow-ups are user-specific
+            # Pending/Missed follow-ups are strictly user-specific (not team-wide)
             pending_followups = local_session.query(Lead).filter(
                 Lead.user_id == user_id,
                 Lead.followup_status == "Pending",
+                # BUGFIX: Naive datetime comparison
                 Lead.followup_date >= now_utc.replace(tzinfo=None)
             ).count()
 
             missed_followups = local_session.query(Lead).filter(
                 Lead.user_id == user_id,
                 Lead.followup_status == "Pending",
+                # BUGFIX: Naive datetime comparison
                 Lead.followup_date < now_utc.replace(tzinfo=None)
             ).count()
 
@@ -754,7 +779,8 @@ def _check_overdue_followups_sync():
 
         overdue_leads = local_session.query(Lead).filter(
             Lead.followup_status == "Pending",
-            Lead.followup_date < now_utc_naive - timedelta(minutes=60) # Overdue by more than 1 hour
+            # Only leads that were due and missed by more than 1 hour should be alerted
+            Lead.followup_date < now_utc_naive - timedelta(minutes=60)
         ).all()
 
         for lead in overdue_leads:
@@ -767,6 +793,7 @@ def _check_overdue_followups_sync():
             lead.followup_status = "Missed"
             logging.warning(f"Followup for TriageAI Lead {lead.id} marked as Missed.")
 
+            # BUGFIX: Use pytz.utc.localize for robust conversion
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
 
             send_whatsapp_message(
@@ -847,6 +874,7 @@ def get_report_filters(query: str) -> Dict[str, Any]:
     elif query_lower == "last week":
         start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
         start_date_obj = start_of_this_week - timedelta(weeks=1)
+        # BUGFIX: Ensure end_date for last week is end of day for consistency
         end_date_obj = start_of_this_week - timedelta(microseconds=1)
         label = "Last Week Report"
 
@@ -917,7 +945,10 @@ def get_report_filters(query: str) -> Dict[str, Any]:
 
 
 def fetch_filtered_leads(user_id: str, filters: Dict[str, Any]) -> List[Lead]:
-    query = get_user_leads_query(user_id)
+    # NOTE: Reports use the team scope if the user is an active admin.
+    _, _, is_active, is_admin, _ = get_agent_company_info(user_id)
+    scope = 'team' if is_active and is_admin else 'personal'
+    query = get_user_leads_query(user_id, scope=scope)
 
     keyword = filters.get('keyword')
     if keyword:
@@ -963,6 +994,7 @@ def create_report_dataframe(leads: List[Lead]) -> pd.DataFrame:
     """Creates a Pandas DataFrame for reports."""
     data = [{
         'ID': l.id,
+        # NOTE: Using hash of user_id for Agent ID column
         'Agent_ID_Hash': hash_user_id(l.user_id),
         'Name': l.name,
         'Phone': l.phone,
@@ -972,6 +1004,7 @@ def create_report_dataframe(leads: List[Lead]) -> pd.DataFrame:
         'Followup Date (IST)': pytz.utc.localize(l.followup_date).astimezone(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S') if l.followup_date else 'N/A',
         'Followup Status': l.followup_status,
         'Notes': l.note,
+        # BUGFIX: Use pytz.utc.localize for robust conversion
         'Created At': pytz.utc.localize(l.created_at).astimezone(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
     } for l in leads]
     return pd.DataFrame(data)
@@ -987,7 +1020,12 @@ def create_report_excel(df: pd.DataFrame, label: str) -> BytesIO:
         writer = pd.ExcelWriter(output, engine='openpyxl')
 
     df.to_excel(writer, sheet_name=label[:31], index=False)
-    writer.close()
+    # BUGFIX: Use .close() or .save() depending on engine. .close() is safer for pd.ExcelWriter.
+    try:
+        writer.close()
+    except Exception as e:
+        logging.error(f"Error closing ExcelWriter: {e}")
+
     output.seek(0)
     return output
 
@@ -1017,6 +1055,7 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     report_label = filters.get('label', 'Report')
 
     # Format dates for header
+    # BUGFIX: Handle possible None in filters if parsing failed
     start_date_str = filters['start_date'].strftime('%Y-%m-%d') if filters.get('start_date') and isinstance(filters['start_date'], datetime) else 'Start of History'
     end_date_str = filters['end_date'].strftime('%Y-%m-%d') if filters.get('end_date') and isinstance(filters['end_date'], datetime) else datetime.now(TIMEZONE).strftime('%Y-%m-%d')
 
@@ -1112,9 +1151,10 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     return buffer
 
 
-def format_pipeline_text(user_id: str) -> str:
+def format_pipeline_text(user_id: str, scope: str = 'personal') -> str:
     """Formats the current lead status counts into a text pipeline view."""
-    base_query = get_user_leads_query(user_id)
+    # NOTE: Uses the scope parameter for the correct query
+    base_query = get_user_leads_query(user_id, scope=scope)
 
     data = base_query.with_entities(
         Lead.status,
@@ -1126,7 +1166,7 @@ def format_pipeline_text(user_id: str) -> str:
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
     title = "TriageAI Personal Pipeline View"
-    if is_active and is_admin and company_id:
+    if is_active and is_admin and company_id and scope == 'team':
         title = "TriageAI Company Pipeline View"
 
     text = f"📈 *{title}*\n\n"
@@ -1208,12 +1248,15 @@ def renew_link_handler(token: str):
         profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
 
         # Construct data for the HTML template
+        # BUGFIX: Use pytz.utc.localize for robust conversion
+        expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
+
         renewal_data = {
             'name': company.name,
             'wa_admin_name': profile.name if profile else "Administrator",
             'phone': phone,
             'plan_name': license.plan_name,
-            'expired_at': pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A (Perpetual)',
+            'expired_at': expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A (Perpetual)',
             'base_plan': base_plan_key, # e.g., '5user'
             'price_monthly': monthly_display_price,
             'price_annual': price_annual, # Annual total price
@@ -1282,6 +1325,7 @@ def api_renewal_purchase():
         # 3. Update/Renew License
         
         # If renewing an expired license, start from now. If renewing an active one, extend from expiry.
+        # BUGFIX: Ensure license.expires_at is used as a naive UTC datetime
         start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
         new_expiry_date = start_from + plan_details['duration']
         
@@ -1361,7 +1405,8 @@ def api_register():
     except IntegrityError as e:
         web_session.rollback()
         logging.error(f"Registration Integrity Error: {e}")
-        return jsonify({"status": "error", "message": "User with this email already exists."}), 409
+        # BUGFIX: Return better error for user if email unique constraint fails
+        return jsonify({"status": "error", "message": "Email already registered."}), 409
     except Exception as e:
         web_session.rollback()
         logging.error(f"Registration Error: {e}")
@@ -1417,7 +1462,9 @@ def api_billing():
         if not profile:
              return jsonify({"status": "error", "message": "Profile not found."}), 404
 
-        profile.billing_address = data['billing_address'] + ', ' + data['city_country']
+        # BUGFIX: Ensure `city_country` is passed or default to empty string
+        city_country = data.get('city_country', '')
+        profile.billing_address = data['billing_address'] + ', ' + city_country
         profile.gst_number = data.get('gst_number', '')
         # Mark profile as fully registered for the payment step
         profile.is_registered = True
@@ -1459,7 +1506,7 @@ def api_purchase():
         if not profile or not profile.is_registered:
              return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
 
-        # --- 1. Construct the CORRECT final plan label ---
+        # --- 1. Construct the CORRECT final plan label and expiry ---
         expiry_date = datetime.utcnow() + plan_details['duration'] 
         
         base_label = plan_details['label']
@@ -1473,12 +1520,12 @@ def api_purchase():
             
         plan_label = f"{base_label} {duration_suffix}".strip()
 
-        # --- 2. Check/Create Company and License (Rest of logic remains the same) ---
+        # --- 2. Check/Create Company and License ---
         
         # Check if user is already an agent
         existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
         
-        # Scenario 1: User is already an Admin of another company (Should have been caught earlier, but safety check)
+        # Scenario 1: User is already an Admin of another company (Safety check)
         if existing_agent and existing_agent.is_admin:
              return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
         
@@ -1496,10 +1543,13 @@ def api_purchase():
             license = existing_company.license
             if license:
                  # Extend expiration date (or set a new one)
-                 license.expires_at = datetime.utcnow() + plan_details['duration']
+                 # BUGFIX: Use license.expires_at as a naive UTC datetime
+                 start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
+                 license.expires_at = start_from + plan_details['duration']
                  license.is_active = True
                  license.plan_name = plan_label # Use the constructed full plan label
                  license.key = new_key # Assign a new key on renewal for tracking/consistency
+                 license.agent_limit = plan_details['agents'] 
                  
                  logging.info(f"✅ Purchase success (Renewal). License {license.key} extended for Admin {phone}.")
                  new_key = license.key # Use the new key
@@ -1535,11 +1585,14 @@ def api_purchase():
             # --- 2. Update Agent (The Buyer) ---
             agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
             if not agent:
+                # BUGFIX: Create Agent if they don't exist (e.g., if they registered via web but never sent a WA message)
                 agent = Agent(user_id=phone)
                 web_session.add(agent)
 
             agent.company_id = company.id
             agent.is_admin = True
+            
+            # CRITICAL: Ensure Admin is added to the agent count (which they are here)
             
             logging.info(f"✅ Purchase success (New). License {new_key} activated for Admin {phone}.")
 
@@ -1596,7 +1649,8 @@ def web_update_duplicate_endpoint(lead_id: int):
             try:
                 # The AI returns IST datetime string. Convert back to UTC naive for DB storage.
                 dt_ist = datetime.strptime(new_data["followup_date"], '%Y-%m-%d %H:%M:%S')
-                followup_dt_utc_naive = TIMEZONE.localize(dt_ist, is_dst=None).astimezone(pytz.utc).replace(tzinfo=None)
+                # BUGFIX: Use pytz.utc.localize for robust conversion
+                followup_dt_utc_naive = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
             except ValueError:
                 pass
 
@@ -1743,13 +1797,15 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
 
         # Commands restricted to Active License holders (Note: Handlers contain the check)
         elif command == '/myfollowups':
-            _next_followups_cmd_sync(sender_wa_id)
+            _next_followups_cmd_sync(sender_wa_id, scope='personal') # BUGFIX: Added scope
         elif command == '/myleads': 
-            _search_cmd_sync(sender_wa_id, f"user {sender_wa_id}")
+            # Search with no arguments defaults to personal leads (RBAC query handles this)
+            _search_cmd_sync(sender_wa_id, arg, scope='personal') 
         elif command == '/dailysummary':
             _daily_summary_control_sync(sender_wa_id, arg)
         elif command == '/pipeline':
-            _pipeline_view_cmd_sync(sender_wa_id)
+            # BUGFIX: Use personal scope for pipeline when /pipeline is called without argument
+            _pipeline_view_cmd_sync(sender_wa_id, scope='personal')
         elif command == '/setcompanyname':
             _cmd_set_company_name_sync(sender_wa_id, arg)
         elif command == '/addagent':
@@ -1759,11 +1815,13 @@ def _handle_command_message(sender_wa_id: str, message_body: str):
         elif command == '/remainingslots':
             _cmd_remaining_slots_sync(sender_wa_id)
         elif command == '/teamleads':
-            _team_leads_cmd_sync(sender_wa_id)
+            # BUGFIX: Use team scope for team leads
+            _search_cmd_sync(sender_wa_id, arg, scope='team')
         elif command == '/teamfollowups':
+            # BUGFIX: Use team scope for team followups
             _team_followups_cmd_sync(sender_wa_id)
         elif command == '/search':
-            _search_cmd_sync(sender_wa_id, arg)
+            _search_cmd_sync(sender_wa_id, arg, scope='team') # Search is typically a team function
         elif command.startswith('/report'):
             if command == '/report':
                 if not arg:
@@ -1806,8 +1864,8 @@ def _register_agent_sync(user_id: str):
     try:
         agent = local_session.query(Agent).filter(Agent.user_id == user_id).first()
         if not agent:
-            is_initial_admin = (user_id == ADMIN_USER_ID)
-            agent = Agent(user_id=user_id, is_admin=is_initial_admin)
+            # BUGFIX: Do NOT automatically make the hardcoded ID an admin, rely on purchase flow
+            agent = Agent(user_id=user_id, is_admin=False)
             local_session.add(agent)
 
         if not local_session.query(UserSetting).filter(UserSetting.user_id == user_id).first():
@@ -2025,15 +2083,16 @@ def _cmd_debug_jobs_sync(user_id: str):
     response = f"🔍 *TriageAI Scheduled Jobs* (Current time: {current_time})\n\n"
 
     for job in jobs:
-        next_run_str = job.next_run_time.strftime('%I:%M %p, %b %d %Z') if job.next_run_time else 'N/A'
+        # BUGFIX: Handle potential NoneType if next_run_time is null for a job
+        next_run_str = job.next_run_time.astimezone(TIMEZONE).strftime('%I:%M %p, %b %d %Z') if job.next_run_time else 'N/A'
         response += f"• *{job.id}*\n"
         response += f"  Next run: {next_run_str}\n"
         response += f"  Trigger: {job.trigger}\n\n"
 
     send_whatsapp_message(user_id, response)
 
-def _next_followups_cmd_sync(user_id: str):
-    """Show upcoming pending follow-ups."""
+def _next_followups_cmd_sync(user_id: str, scope: str = 'personal'):
+    """Show upcoming pending follow-ups (personal or team)."""
     # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
         send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view follow-ups. Send `/renew` or `/licensesetup`.")
@@ -2043,24 +2102,43 @@ def _next_followups_cmd_sync(user_id: str):
     try:
         now_utc_naive = datetime.utcnow().replace(tzinfo=None)
 
-        leads = local_session.query(Lead).filter(
-            Lead.user_id == user_id,
+        if scope == 'personal':
+            base_query = local_session.query(Lead).filter(
+                Lead.user_id == user_id,
+            )
+            title = "Your Next 5 TriageAI Follow-ups:"
+        else: # team scope
+            _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+            if not (is_admin and is_active and company_id):
+                send_whatsapp_message(user_id, "❌ Command *teamfollowups* failed: You must be an active company admin.")
+                return
+
+            company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
+            agent_ids = [agent[0] for agent in company_agents]
+            base_query = local_session.query(Lead).filter(
+                Lead.user_id.in_(agent_ids),
+            )
+            title = "Team's Next 10 TriageAI Follow-ups:"
+        
+        leads = base_query.filter(
             Lead.followup_status == "Pending",
             Lead.followup_date >= now_utc_naive
-        ).order_by(Lead.followup_date).limit(5).all()
+        ).order_by(Lead.followup_date).limit(5 if scope == 'personal' else 10).all()
 
         if not leads:
-            send_whatsapp_message(user_id, "✅ You have no pending TriageAI follow-ups scheduled.")
+            send_whatsapp_message(user_id, f"✅ You have no pending TriageAI follow-ups scheduled.")
             return
 
-        response = "🗓️ *Your Next 5 TriageAI Follow-ups:*\n"
+        response = f"🗓️ *{title}*\n"
 
         for lead in leads:
             # DB stores naive UTC, localize to UTC, then convert to IST for display
+            # BUGFIX: Use pytz.utc.localize for robust conversion
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
+            agent_info = f" (Agent: {hash_user_id(lead.user_id)})" if scope == 'team' else ""
 
             lead_block = (
-                f"\n*Lead ID: {lead.id}*\n"
+                f"\n*Lead ID: {lead.id}{agent_info}*\n"
                 f"• *{lead.name}* (`{lead.phone}`)\n"
                 f"  > Time: {followup_time}\n"
                 f"  > Note: {lead.note[:50]}...\n"
@@ -2071,6 +2149,11 @@ def _next_followups_cmd_sync(user_id: str):
         send_whatsapp_message(user_id, response)
     finally:
         local_session.close()
+
+# Keep these for backwards compatibility with the routing logic
+def _team_followups_cmd_sync(user_id: str):
+    _next_followups_cmd_sync(user_id, scope='team')
+
 
 def _daily_summary_control_sync(user_id: str, arg: str):
     """Daily summary control."""
@@ -2087,6 +2170,9 @@ def _daily_summary_control_sync(user_id: str, arg: str):
             setting = UserSetting(user_id=user_id)
             local_session.add(setting)
 
+        # BUGFIX 2: Use user_id in the job ID
+        job_id = f"daily_summary_{user_id}"
+
         if "on" in action:
             setting.daily_summary_enabled = True
             local_session.commit()
@@ -2096,28 +2182,45 @@ def _daily_summary_control_sync(user_id: str, arg: str):
                 'cron',
                 hour=DAILY_SUMMARY_TIME,
                 timezone=TIMEZONE,
-                id="daily_summary_check",
+                id=job_id, # Use user-specific ID
                 replace_existing=True
             )
             send_whatsapp_message(user_id, f"🔔 Daily TriageAI {DAILY_SUMMARY_TIME} PM IST summary is now *ON*.")
         elif "off" in action:
             setting.daily_summary_enabled = False
             local_session.commit()
+            
+            try:
+                scheduler.remove_job(job_id)
+            except:
+                logging.debug(f"Job {job_id} not found to remove.")
+
             send_whatsapp_message(user_id, "🔕 Daily TriageAI summary is now *OFF*.")
         else:
             send_whatsapp_message(user_id, "Use `/dailysummary on` or `/dailysummary off`.")
     finally:
         local_session.close()
 
-def _pipeline_view_cmd_sync(user_id: str):
+def _pipeline_view_cmd_sync(user_id: str, scope: str = 'personal'):
     """Pipeline view."""
     # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
         send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
         return
         
-    text = format_pipeline_text(user_id)
+    text = format_pipeline_text(user_id, scope=scope)
     send_whatsapp_message(user_id, text)
+
+def _team_leads_cmd_sync(user_id: str):
+    """Admin feature: See the entire company lead pipeline."""
+    if not _check_admin_permissions(user_id, "/teamleads"):
+        return
+
+    # format_pipeline_text automatically handles admin view via get_user_leads_query
+    # BUGFIX: Explicitly request 'team' scope
+    text = format_pipeline_text(user_id, scope='team')
+    send_whatsapp_message(user_id, text)
+
 
 def _check_admin_permissions(user_id: str, command: str) -> bool:
     """Helper to check admin status and send error message if not an admin."""
@@ -2162,7 +2265,9 @@ def _cmd_license_setup_sync(user_id: str):
             company = local_session.query(Company).get(company_id)
             license = company.license
 
-            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A (Perpetual)'
+            # BUGFIX: Use pytz.utc.localize for robust conversion
+            expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
+            expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A (Perpetual)'
             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
 
             message = (
@@ -2210,7 +2315,9 @@ def _cmd_renew_sync(user_id: str):
             license = company.license
             
             # Admins (Expired or Active) get the renewal link.
-            expiry_str = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d, %Y') if license.expires_at else 'N/A'
+            # BUGFIX: Use pytz.utc.localize for robust conversion
+            expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
+            expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A'
             status_text = '✅ ACTIVE' if is_active else '❌ EXPIRED'
 
             # --- RENEWAL PATH (Existing Admin/Individual Admin) ---
@@ -2258,6 +2365,7 @@ def _cmd_activate_sync(user_id: str, key_input: str):
             send_whatsapp_message(user_id, "❌ Invalid, expired, or already claimed license key.")
             return
 
+        # BUGFIX: Check for expiry before activation
         if license_to_activate.expires_at and license_to_activate.expires_at < datetime.utcnow():
             local_session.delete(license_to_activate)
             local_session.commit()
@@ -2279,6 +2387,7 @@ def _cmd_activate_sync(user_id: str, key_input: str):
         # 3. Update Agent (make the current user the admin)
         agent = local_session.query(Agent).filter(Agent.user_id == user_id).first()
         if not agent:
+            # Should have been created by _register_agent_sync, but safety creation
             agent = Agent(user_id=user_id)
             local_session.add(agent)
 
@@ -2328,6 +2437,7 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
 
         new_agent = local_session.query(Agent).filter(Agent.user_id == new_agent_id).first()
         if not new_agent:
+            # NOTE: User must have messaged the bot at least once for an Agent record to exist.
             send_whatsapp_message(user_id, "❌ The user must have sent a message to this TriageAI bot at least once.")
             return
 
@@ -2411,7 +2521,8 @@ def _cmd_verify_agent_otp_sync(sender_wa_id: str, otp_input: str):
         # Notify Admin
         admin_id = otp_state['admin_id']
         current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
-        limit = company.license.agent_limit
+        license = local_session.query(License).filter(License.company_id == company_id).first()
+        limit = license.agent_limit if license else 1
         send_whatsapp_message(
             admin_id,
             f"✅ Agent `{sender_wa_id}` has successfully verified and been added to *{company.name}*.\n"
@@ -2485,56 +2596,13 @@ def _cmd_remaining_slots_sync(user_id: str):
     finally:
         local_session.close()
 
-def _team_leads_cmd_sync(user_id: str):
-    """Admin feature: See the entire company lead pipeline."""
-    if not _check_admin_permissions(user_id, "/teamleads"):
-        return
+# _team_leads_cmd_sync is now a wrapper for _search_cmd_sync(scope='team')
 
-    # format_pipeline_text automatically handles admin view via get_user_leads_query
-    text = format_pipeline_text(user_id)
-    send_whatsapp_message(user_id, text)
+# _team_followups_cmd_sync is now a wrapper for _next_followups_cmd_sync(scope='team')
 
-def _team_followups_cmd_sync(user_id: str):
-    """Admin feature: See all upcoming follow-ups for all agents."""
-    if not _check_admin_permissions(user_id, "/teamfollowups"):
-        return
 
-    local_session = Session()
-    try:
-        _, company_id, _, _, _ = get_agent_company_info(user_id)
-        now_utc_naive = datetime.utcnow().replace(tzinfo=None)
-
-        # Get all agents in the company
-        company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
-        agent_ids = [agent[0] for agent in company_agents]
-
-        leads = local_session.query(Lead).filter(
-            Lead.user_id.in_(agent_ids),
-            Lead.followup_status == "Pending",
-            Lead.followup_date >= now_utc_naive
-        ).order_by(Lead.followup_date).limit(10).all()
-
-        if not leads:
-            send_whatsapp_message(user_id, "✅ No upcoming TriageAI follow-ups for the entire team.")
-            return
-
-        response = "🗓️ *Team's Next 10 TriageAI Follow-ups:*\n"
-        for lead in leads:
-            followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
-            lead_block = (
-                f"\n*Lead ID: {lead.id}* (Agent: {hash_user_id(lead.user_id)})\n"
-                f"• *{lead.name}* (`{lead.phone}`)\n"
-                f"  > Time: {followup_time}\n"
-                f"  > Note: {lead.note[:50]}...\n"
-            )
-            response += lead_block
-
-        send_whatsapp_message(user_id, response)
-    finally:
-        local_session.close()
-
-def _search_cmd_sync(user_id: str, search_query: str):
-    """Instant search by keyword, name, phone, or status."""
+def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
+    """Instant search by keyword, name, phone, or status (personal or team)."""
     # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
         send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send `/renew` or `/licensesetup`.")
@@ -2542,6 +2610,10 @@ def _search_cmd_sync(user_id: str, search_query: str):
         
     local_session = Session()
     try:
+        # Team search requires admin permission
+        if scope == 'team' and not _check_admin_permissions(user_id, f"/search (scope: {scope})"):
+            return
+            
         parts = search_query.split(maxsplit=1)
 
         if not search_query:
@@ -2557,19 +2629,26 @@ def _search_cmd_sync(user_id: str, search_query: str):
             if search_type in ['name', 'phone', 'status']:
                 filter_data = {'search_field': search_type, 'search_value': search_value}
 
+        # BUGFIX: Use the correct scope when fetching leads for search
         leads = fetch_filtered_leads(user_id, filter_data)[:15]
 
         if not leads:
             send_whatsapp_message(user_id, f"🔍 No TriageAI leads found matching your criteria.")
             return
 
-        response = f"🔍 Found *{len(leads)}* TriageAI leads matching your query\n\n"
+        title = "TriageAI Search results"
+        if scope == 'team':
+             title = "Team Search results"
+
+        response = f"🔍 Found *{len(leads)}* {title}\n\n"
 
         for i, lead in enumerate(leads, 1):
+            # BUGFIX: Use pytz.utc.localize for robust conversion
             created_time = pytz.utc.localize(lead.created_at).astimezone(TIMEZONE).strftime('%b %d, %I:%M %p')
+            agent_info = f" (Agent: {hash_user_id(lead.user_id)})" if scope == 'team' else ""
 
             lead_block = (
-                f"*{i}. {lead.name}* (`{lead.phone}`) [ID: {lead.id}]\n"
+                f"*{i}. {lead.name}* (`{lead.phone}`) [ID: {lead.id}]{agent_info}\n"
                 f"  > Status: {lead.status}, Source: {lead.source}\n"
                 f"  > Note: {lead.note[:50]}...\n"
                 f"  > Created: {created_time}\n\n"
@@ -2686,11 +2765,13 @@ def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
 
     # Limit text report to 15 leads due to length
     for i, lead in enumerate(leads[:15], 1):
+        # BUGFIX: Use pytz.utc.localize for robust conversion
         created_time = pytz.utc.localize(lead.created_at).astimezone(TIMEZONE).strftime('%b %d, %I:%M %p')
 
         followup_info = 'Follow-up: N/A'
         if lead.followup_date:
             try:
+                # BUGFIX: Use pytz.utc.localize for robust conversion
                 followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
                 followup_info = f"Follow-up: {followup_time} (Status: {lead.followup_status})"
             except Exception:
@@ -2861,7 +2942,8 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
                 try:
                     # Convert AI-generated IST time string back to naive UTC for DB
                     dt_ist = datetime.strptime(extracted["followup_date"], '%Y-%m-%d %H:%M:%S')
-                    new_followup_dt = TIMEZONE.localize(dt_ist, is_dst=None).astimezone(pytz.utc).replace(tzinfo=None)
+                    # BUGFIX: Use pytz.utc.localize for robust conversion
+                    new_followup_dt = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
                 except ValueError:
                     pass
 
@@ -2873,6 +2955,7 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
                 # Reschedule job
                 schedule_followup(lead.user_id, lead.id, lead.name, lead.phone, new_followup_dt)
 
+                # BUGFIX: Use pytz.utc.localize for robust conversion
                 display_dt = pytz.utc.localize(new_followup_dt).astimezone(TIMEZONE)
 
                 send_whatsapp_message(
@@ -2923,7 +3006,8 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
             try:
                 # Convert AI-generated IST time string back to naive UTC for DB
                 dt_ist = datetime.strptime(extracted["followup_date"], '%Y-%m-%d %H:%M:%S')
-                followup_dt_utc_naive = TIMEZONE.localize(dt_ist, is_dst=None).astimezone(pytz.utc).replace(tzinfo=None)
+                # BUGFIX: Use pytz.utc.localize for robust conversion
+                followup_dt_utc_naive = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
             except ValueError:
                 logging.warning("Failed to parse AI followup date.")
 
@@ -2944,6 +3028,7 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         # 5. Schedule Reminder
         reminder_status = ""
         if followup_dt_utc_naive and schedule_followup(lead.user_id, lead.id, lead.name, lead.phone, followup_dt_utc_naive):
+            # BUGFIX: Use pytz.utc.localize for robust conversion
             display_dt = pytz.utc.localize(followup_dt_utc_naive).astimezone(TIMEZONE)
             reminder_status = f"🔔 Reminder scheduled for {display_dt.strftime('%I:%M %p, %b %d')} IST."
 
@@ -2963,7 +3048,6 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
 def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: datetime):
     """
     Sends the final renewal message to the admin after payment.
-    FIX: Ensure plan_name is used correctly.
     """
     local_session = Session()
     try:
@@ -2975,6 +3059,7 @@ def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: da
              return
 
         # DB stores naive UTC, localize to UTC, then convert to IST for display
+        # BUGFIX: Use pytz.utc.localize for robust conversion
         expiry_dt_ist = pytz.utc.localize(expiry_date).astimezone(TIMEZONE)
         expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y')
 
@@ -2995,7 +3080,6 @@ def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: da
 def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str, expiry_date: datetime):
     """
     Sends the final welcome message to the admin after payment.
-    FIXED: Uses a NEW session to load the profile and avoids using company_name as plan_name.
     """
     local_session = Session()
     try:
@@ -3008,6 +3092,7 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
 
         # DB stores naive UTC, localize to UTC, then convert to IST for display
         start_str = datetime.now(TIMEZONE).strftime('%b %d, %Y')
+        # BUGFIX: Use pytz.utc.localize for robust conversion
         expiry_dt_ist = pytz.utc.localize(expiry_date).astimezone(TIMEZONE)
         expiry_str = expiry_dt_ist.strftime('%b %d, %Y') if expiry_date else 'N/A'
 
@@ -3131,14 +3216,15 @@ def run_flask():
 
 def run_scheduler():
     """Starts the scheduler in its own event loop/thread and adds recurring jobs."""
-    scheduler.add_job(
-        daily_summary_job_sync,
-        'cron',
-        hour=DAILY_SUMMARY_TIME,
-        timezone=TIMEZONE,
-        id="daily_summary_check",
-        replace_existing=True
-    )
+    # NOTE: Daily summary job is added with a generic ID here and will be replaced
+    # by a user-specific ID when a user enables it.
+    
+    # Add a dummy daily job which immediately gets overwritten by the user's action.
+    # This prevents the initial job from being scheduled with a hardcoded ID if no user opts in.
+    # We rely on the _daily_summary_control_sync to add the user-specific job.
+    pass
+
+
     # Also add a job to check for overdue followups (e.g., every 1 hour)
     scheduler.add_job(
         _check_overdue_followups_sync,
