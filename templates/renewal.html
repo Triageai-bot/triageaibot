@@ -95,11 +95,14 @@
         alert("Simulating successful payment for renewal...");
         
         // Determine the backend key for the chosen duration
-        let backendKey = renewalState.basePlan + (renewalState.duration === 'monthly' ? '_monthly' : '_annual');
+        let backendKey;
         
-        // Handle individual plan key which is just 'individual'
         if (renewalState.basePlan === 'individual') {
-             backendKey = 'individual';
+             // FIX: Individual plan must use 'individual_annual' for annual, and 'individual' for monthly
+             backendKey = renewalState.duration === 'monthly' ? 'individual' : 'individual_annual';
+        } else {
+             // Team plans use the _monthly/_annual suffix format
+             backendKey = renewalState.basePlan + (renewalState.duration === 'monthly' ? '_monthly' : '_annual');
         }
         
         try {

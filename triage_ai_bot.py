@@ -730,7 +730,7 @@ def daily_summary_job_sync():
             if is_admin and is_active and company_id:
                 report_scope = "TriageAI Daily Company Summary"
 
-            text = f"☀️ *{report_scope} - {now_ist.strftime('%b %d')}*\n\n"
+            text = f"☀️ *{report_scope - {now_ist.strftime('%b %d')}*\n\n"
             text += f"Total Leads Today: *{total_today}*\n"
             text += f"Converted Today: *{status_counts.get('Converted', 0)}*\n"
             text += f"Hot Leads: *{status_counts.get('Hot', 0)}*\n"
