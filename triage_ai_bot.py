@@ -101,14 +101,17 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 # --- DUMMY PAYMENT CONFIG ---
 PLANS = {
-    # Individual Plan: 1 agent (Monthly only, annual price displayed is discounted monthly rate)
-    "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent) Monthly"},
+    # Individual Plan: 1 agent (Use base label and construct duration dynamically)
+    "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent)"},
+    "individual_annual": {"agents": 1, "price": 249 * 12, "duration": timedelta(days=365), "label": "Individual (1 Agent)"},
+    
     # 5-User Plan: Maps 5user monthly/annual keys from frontend
-    "5user_monthly": {"agents": 5, "price": 1495, "duration": timedelta(days=30), "label": "5-User Team Monthly"},
-    "5user_annual": {"agents": 5, "price": 1245 * 12, "duration": timedelta(days=365), "label": "5-User Team Annual (Discounted)"},
+    "5user_monthly": {"agents": 5, "price": 1495, "duration": timedelta(days=30), "label": "5-User Team"},
+    "5user_annual": {"agents": 5, "price": 1245 * 12, "duration": timedelta(days=365), "label": "5-User Team"},
+    
     # 10-User Plan: Maps 10user monthly/annual keys from frontend
-    "10user_monthly": {"agents": 10, "price": 2990, "duration": timedelta(days=30), "label": "10-User Pro Monthly"},
-    "10user_annual": {"agents": 10, "price": 2490 * 12, "duration": timedelta(days=365), "label": "10-User Pro Annual (Discounted)"},
+    "10user_monthly": {"agents": 10, "price": 2990, "duration": timedelta(days=30), "label": "10-User Pro"},
+    "10user_annual": {"agents": 10, "price": 2490 * 12, "duration": timedelta(days=365), "label": "10-User Pro"},
 }
 
 # --- IN-MEMORY STATE FOR OTP ---
@@ -1175,40 +1178,27 @@ def renew_link_handler(token: str):
         company = local_session.query(Company).get(agent.company_id)
         license = company.license
         
-        # Determine the base plan name (e.g., '5user' from '5-User Team Monthly')
-        full_plan_key = next(
-            (k for k, p in PLANS.items() if p['label'] == license.plan_name), 
-            'individual' # Default to individual if somehow misaligned
-        )
+        # --- License.plan_name contains the full label like "Individual (1 Agent) Monthly" ---
         
-        # === FIX: Correctly extract base plan key, handling individual case ===
-        if full_plan_key == 'individual' or full_plan_key == 'individual_monthly':
-             base_plan_key = 'individual'
-        elif full_plan_key.endswith('_monthly'):
-             base_plan_key = full_plan_key.replace('_monthly', '')
-        elif full_plan_key.endswith('_annual'):
-             base_plan_key = full_plan_key.replace('_annual', '')
-        else:
-             base_plan_key = 'individual'
+        # Determine the base plan key based on the stored plan_name
+        base_plan_key = 'individual'
+        if '5-User Team' in license.plan_name:
+             base_plan_key = '5user'
+        elif '10-User Pro' in license.plan_name:
+             base_plan_key = '10user'
+        # else it remains 'individual'
 
         
         # Look up price info for the monthly/annual equivalent of the base plan
-        # Fetch data for MONTHLY and ANNUAL pricing based on the *base* key
         monthly_plan_key = f'{base_plan_key}_monthly' if base_plan_key != 'individual' else 'individual'
-        annual_plan_key = f'{base_plan_key}_annual' if base_plan_key != 'individual' else 'individual'
+        annual_plan_key = f'{base_plan_key}_annual' if base_plan_key != 'individual' else 'individual_annual'
         
         monthly_plan = PLANS.get(monthly_plan_key, PLANS['individual'])
+        annual_plan = PLANS.get(annual_plan_key, PLANS[monthly_plan_key]) # Fallback for safety
         
-        # For the annual calculation on the renewal page, check if the full annual key exists in PLANS.
-        # This prevents the annual price from being calculated based on the monthly individual price.
-        if base_plan_key == 'individual':
-             price_monthly = PLANS['individual']['price']
-             # Hardcode the displayed annual total based on the advertised 249/mo rate
-             price_annual = 249 * 12
-        else:
-             annual_plan = PLANS.get(annual_plan_key, monthly_plan)
-             price_monthly = monthly_plan['price']
-             price_annual = annual_plan['price']
+        # Use the prices from the PLANS structure
+        price_monthly = monthly_plan['price']
+        price_annual = annual_plan['price']
         
         # Mocking the discounted display price for the frontend (reverse calculation)
         monthly_display_price = price_monthly
@@ -1254,9 +1244,8 @@ def api_renewal_purchase():
 
     data = request.json
     
-    # === FIX: Define token and plan_key correctly from request.json ===
-    token = data.get('token') # FIX: Define token locally
-    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual'
+    token = data.get('token')
+    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual_annual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
     # 1. Validate Renewal Token
@@ -1275,7 +1264,7 @@ def api_renewal_purchase():
         return jsonify({"status": "error", "message": "Invalid plan key"}), 400
 
     web_session = Session()
-    new_expiry_date = None # Initialize outside try
+    new_expiry_date = None 
     plan_label = ""
     try:
         # 2. Locate Admin/Company
@@ -1294,12 +1283,22 @@ def api_renewal_purchase():
         # If renewing an expired license, start from now. If renewing an active one, extend from expiry.
         start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
         new_expiry_date = start_from + plan_details['duration']
-        plan_label = plan_details['label'] # Use the full plan label
+        
+        # === FIX: Build the proper plan_label with duration ===
+        base_label = plan_details['label']
+        if 'annual' in plan_key:
+            duration_suffix = "Annual (Discounted)"
+        elif 'monthly' in plan_key or plan_key == 'individual':
+            duration_suffix = "Monthly"
+        else:
+            duration_suffix = ""
+            
+        plan_label = f"{base_label} {duration_suffix}".strip()
         
         license.expires_at = new_expiry_date
         license.is_active = True
-        license.plan_name = plan_label
-        license.agent_limit = plan_details['agents'] # Update agent limit in case they changed plans
+        license.plan_name = plan_label # Use the constructed full plan label
+        license.agent_limit = plan_details['agents'] 
         
         web_session.commit()
         
@@ -1440,17 +1439,15 @@ def api_purchase():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
-    plan_key = data.get('plan') # This is the full key like '5user_monthly' or '5user_annual'
+    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual_annual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
-    # === FIX: Use the plan_key directly for details lookup (this ensures annual plans are respected) ===
     plan_details = PLANS.get(plan_key)
 
     if not plan_details:
         return jsonify({"status": "error", "message": "Invalid plan key"}), 400
 
     web_session = Session()
-    # CRITICAL FIX 1: Define variables for threading BEFORE commit/close
     new_key = ""
     expiry_date = None
     plan_label = ""
@@ -1460,7 +1457,20 @@ def api_purchase():
         if not profile or not profile.is_registered:
              return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
 
-        # --- 1. Check/Create Company and License ---
+        # --- 1. Construct the CORRECT final plan label ---
+        expiry_date = datetime.utcnow() + plan_details['duration'] 
+        
+        base_label = plan_details['label']
+        if 'annual' in plan_key:
+            duration_suffix = "Annual (Discounted)"
+        elif 'monthly' in plan_key or plan_key == 'individual':
+            duration_suffix = "Monthly"
+        else:
+            duration_suffix = ""
+            
+        plan_label = f"{base_label} {duration_suffix}".strip()
+
+        # --- 2. Check/Create Company and License (Rest of logic remains the same) ---
         
         # Check if user is already an agent
         existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
@@ -1473,10 +1483,6 @@ def api_purchase():
         
         new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]  # Generate license key
         
-        # === FIX: Use duration from plan_details (which respects annual keys) ===
-        expiry_date = datetime.utcnow() + plan_details['duration'] 
-        plan_label = plan_details['label'] # Store label for messaging
-        
         company_name = profile.company_name if profile.company_name else "TriageAI Company"
         
         # Check if we can reuse the existing company/license (for renewal logic)
@@ -1484,13 +1490,12 @@ def api_purchase():
         
         if existing_company:
             # RENEWAL PATH (Only possible if the license is expired or near expiry)
-            # For simplicity in this mock, we just update the existing license (as if payment covered it)
             license = existing_company.license
             if license:
                  # Extend expiration date (or set a new one)
                  license.expires_at = datetime.utcnow() + plan_details['duration']
                  license.is_active = True
-                 license.plan_name = plan_label
+                 license.plan_name = plan_label # Use the constructed full plan label
                  license.key = new_key # Assign a new key on renewal for tracking/consistency
                  
                  logging.info(f"✅ Purchase success (Renewal). License {license.key} extended for Admin {phone}.")
@@ -1543,8 +1548,8 @@ def api_purchase():
 
         # --- 3. Send WhatsApp Welcome Message (Async) ---
         threading.Thread(
-            target=_send_admin_welcome_message_sync_fixed, # Using the fixed function
-            args=(phone, plan_label, new_key, expiry_date) # Passing phone (PK) instead of profile object
+            target=_send_admin_welcome_message_sync_fixed, # This uses the plan_label we just set
+            args=(phone, plan_label, new_key, expiry_date) 
         ).start()
 
 
