@@ -1182,14 +1182,13 @@ def renew_link_handler(token: str):
         )
         
         # === FIX: Correctly extract base plan key, handling individual case ===
-        if full_plan_key == 'individual':
+        if full_plan_key == 'individual' or full_plan_key == 'individual_monthly':
              base_plan_key = 'individual'
         elif full_plan_key.endswith('_monthly'):
              base_plan_key = full_plan_key.replace('_monthly', '')
         elif full_plan_key.endswith('_annual'):
              base_plan_key = full_plan_key.replace('_annual', '')
         else:
-             # This handles old license keys that might not match the current PLANS map exactly
              base_plan_key = 'individual'
 
         
@@ -1199,20 +1198,21 @@ def renew_link_handler(token: str):
         annual_plan_key = f'{base_plan_key}_annual' if base_plan_key != 'individual' else 'individual'
         
         monthly_plan = PLANS.get(monthly_plan_key, PLANS['individual'])
-        annual_plan = PLANS.get(annual_plan_key, monthly_plan) 
         
-        # If it's the simple 'individual' plan, monthly/annual keys are the same, but we calculate prices
+        # For the annual calculation on the renewal page, check if the full annual key exists in PLANS.
+        # This prevents the annual price from being calculated based on the monthly individual price.
         if base_plan_key == 'individual':
              price_monthly = PLANS['individual']['price']
-             # Simulate the annual price based on the front-end display logic (249 * 12)
+             # Hardcode the displayed annual total based on the advertised 249/mo rate
              price_annual = 249 * 12
         else:
+             annual_plan = PLANS.get(annual_plan_key, monthly_plan)
              price_monthly = monthly_plan['price']
              price_annual = annual_plan['price']
         
         # Mocking the discounted display price for the frontend (reverse calculation)
         monthly_display_price = price_monthly
-        annual_display_price_per_month = price_annual / 12 if price_annual else price_monthly
+        annual_display_price_per_month = price_annual / 12 
         
         profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
 
@@ -1253,11 +1253,14 @@ def api_renewal_purchase():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
+    
+    # === FIX: Define token and plan_key correctly from request.json ===
+    token = data.get('token')
     plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
     # 1. Validate Renewal Token
-    if token not in RENEWAL_TOKEN_STORE or RENEWAL_TOKEN_STORE[token]['phone'] != phone:
+    if not token or token not in RENEWAL_TOKEN_STORE or RENEWAL_TOKEN_STORE[token]['phone'] != phone:
          return jsonify({"status": "error", "message": "Invalid or expired renewal session."}), 403
     
     token_data = RENEWAL_TOKEN_STORE[token]
@@ -1266,7 +1269,6 @@ def api_renewal_purchase():
         if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
         return jsonify({"status": "error", "message": "Renewal session expired."}), 403
 
-    # === FIX: Ensure we use the correct PLAN details based on the full key (e.g., 5user_annual) ===
     plan_details = PLANS.get(plan_key)
 
     if not plan_details:
@@ -1441,7 +1443,7 @@ def api_purchase():
     plan_key = data.get('plan') # This is the full key like '5user_monthly' or '5user_annual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
-    # === FIX: Use the plan_key directly for details lookup ===
+    # === FIX: Use the plan_key directly for details lookup (this ensures annual plans are respected) ===
     plan_details = PLANS.get(plan_key)
 
     if not plan_details:
@@ -1470,7 +1472,9 @@ def api_purchase():
         # Scenario 2 & 3: Proceed to create new company
         
         new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]  # Generate license key
-        expiry_date = datetime.utcnow() + plan_details['duration']
+        
+        # === FIX: Use duration from plan_details (which respects annual keys) ===
+        expiry_date = datetime.utcnow() + plan_details['duration'] 
         plan_label = plan_details['label'] # Store label for messaging
         
         company_name = profile.company_name if profile.company_name else "TriageAI Company"
@@ -2185,8 +2189,6 @@ def _cmd_renew_sync(user_id: str):
     """
     Provides the personalized link for license renewal to expired/active admins. 
     Directs new users to /register.
-    
-    FIXED: Handles individual users who are admins of their one-person company.
     """
     WEBSITE_URL = "https://triageai.online/" # Base URL
 
