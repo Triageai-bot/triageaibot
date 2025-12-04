@@ -3,77 +3,465 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TriageAI - Pricing & Purchase</title>
+    <title>TriageAI - Smart Lead Management via WhatsApp</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body { 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #2d1154;
+            --secondary-color: #25D366;
+            --accent-color: #e91e63;
+            --text-dark: #1a1a1a;
+            --text-light: #666;
+            --bg-light: #fafafa;
+            --gradient-primary: linear-gradient(135deg, #2d1154 0%, #1f0b3a 100%);
+        }
+
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #ffffff;
-            color: #1a1a1a;
             line-height: 1.6;
+            color: var(--text-dark);
+            overflow-x: hidden;
         }
-        
-        .container { 
-            width: 90%; 
-            max-width: 1400px; 
-            margin: 0 auto; 
-            padding: 20px; 
+
+        /* Smooth Scroll */
+        html {
+            scroll-behavior: smooth;
         }
-        
-        /* Header */
-        header { 
-            background: #ffffff;
-            color: #1a1a1a; 
-            padding: 80px 0 60px;
-            text-align: center;
-            border-bottom: 1px solid #f0f0f0;
+
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            transition: all 0.3s ease;
         }
-        
-        header h1 { 
-            font-size: 3.5em; 
-            font-weight: 800;
-            margin-bottom: 20px;
-            letter-spacing: -1.5px;
-            color: #2d1154;
+
+        .navbar.scrolled {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         }
-        
-        header p {
-            font-size: 1.3em;
-            color: #666;
-            max-width: 800px;
+
+        .nav-container {
+            max-width: 1400px;
             margin: 0 auto;
-            font-weight: 400;
-            line-height: 1.5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
         }
-        
-        /* Pricing Section */
-        .pricing-section { 
-            padding: 60px 0 80px;
-            background: #fafafa;
+
+        .logo {
+            font-size: 1.8em;
+            font-weight: 800;
+            color: var(--primary-color);
+            letter-spacing: -0.5px;
         }
-        
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            gap: 2.5rem;
+            align-items: center;
+        }
+
+        .nav-menu a {
+            text-decoration: none;
+            color: var(--text-dark);
+            font-weight: 500;
+            transition: color 0.3s;
+            position: relative;
+        }
+
+        .nav-menu a::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--primary-color);
+            transition: width 0.3s;
+        }
+
+        .nav-menu a:hover::after {
+            width: 100%;
+        }
+
+        .cta-button {
+            background: var(--gradient-primary);
+            color: white;
+            padding: 0.7rem 1.5rem;
+            border-radius: 25px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.3s;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(45, 17, 84, 0.3);
+        }
+
+        .mobile-toggle {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+        }
+
+        .mobile-toggle span {
+            width: 25px;
+            height: 3px;
+            background: var(--primary-color);
+            margin: 3px 0;
+            transition: 0.3s;
+        }
+
+        /* Hero Section */
+        .hero {
+            margin-top: 80px;
+            padding: 100px 2rem;
+            background: var(--gradient-primary);
+            color: white;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -10%;
+            width: 500px;
+            height: 500px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 50%;
+        }
+
+        .hero-content {
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero h1 {
+            font-size: 3.5em;
+            margin-bottom: 1.5rem;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+
+        .hero p {
+            font-size: 1.3em;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-primary, .btn-secondary {
+            padding: 1rem 2.5rem;
+            border-radius: 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(37, 211, 102, 0.4);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: white;
+            border: 2px solid white;
+        }
+
+        .btn-secondary:hover {
+            background: white;
+            color: var(--primary-color);
+        }
+
+        /* Product Section */
+        .product-section {
+            padding: 100px 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
         .section-header {
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 4rem;
         }
-        
-        .section-header h2 {
-            font-size: 0.95em;
-            color: #999;
-            margin-bottom: 40px;
+
+        .section-tag {
+            color: var(--primary-color);
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 2px;
+            font-size: 0.9em;
+            margin-bottom: 1rem;
         }
-        
-        /* Toggle Switch */
+
+        .section-title {
+            font-size: 2.8em;
+            font-weight: 800;
+            color: var(--text-dark);
+            margin-bottom: 1rem;
+        }
+
+        .section-description {
+            font-size: 1.2em;
+            color: var(--text-light);
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2.5rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            padding: 2.5rem;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-8px);
+            border-color: var(--primary-color);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        }
+
+        .feature-icon {
+            font-size: 3em;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.5em;
+            margin-bottom: 1rem;
+            color: var(--text-dark);
+        }
+
+        .feature-card p {
+            color: var(--text-light);
+            line-height: 1.8;
+        }
+
+        /* About Section */
+        .about-section {
+            padding: 100px 2rem;
+            background: var(--bg-light);
+        }
+
+        .about-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .about-text h2 {
+            font-size: 2.5em;
+            margin-bottom: 1.5rem;
+            color: var(--text-dark);
+        }
+
+        .about-text p {
+            font-size: 1.1em;
+            color: var(--text-light);
+            margin-bottom: 1.5rem;
+            line-height: 1.8;
+        }
+
+        .about-stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .stat-box {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: 800;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            color: var(--text-light);
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Partners Section */
+        .partners-section {
+            padding: 80px 2rem;
+            background: white;
+            overflow: hidden;
+        }
+
+        .partners-track {
+            display: flex;
+            gap: 4rem;
+            animation: scroll 30s linear infinite;
+            width: fit-content;
+        }
+
+        .partner-logo {
+            font-size: 2em;
+            color: var(--text-light);
+            opacity: 0.6;
+            transition: opacity 0.3s;
+            white-space: nowrap;
+            font-weight: 600;
+        }
+
+        .partner-logo:hover {
+            opacity: 1;
+        }
+
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* Testimonials */
+        .testimonials-section {
+            padding: 100px 2rem;
+            background: var(--bg-light);
+        }
+
+        .testimonials-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .testimonial-card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            position: relative;
+        }
+
+        .quote-icon {
+            font-size: 3em;
+            color: var(--primary-color);
+            opacity: 0.2;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+        }
+
+        .testimonial-text {
+            font-size: 1.1em;
+            color: var(--text-dark);
+            margin-bottom: 1.5rem;
+            line-height: 1.8;
+            position: relative;
+            z-index: 1;
+        }
+
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .author-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2em;
+        }
+
+        .author-info h4 {
+            color: var(--text-dark);
+            margin-bottom: 0.2rem;
+        }
+
+        .author-info p {
+            color: var(--text-light);
+            font-size: 0.9em;
+        }
+
+        /* Pricing Section */
+        .pricing-section {
+            padding: 100px 2rem;
+            background: var(--bg-light);
+        }
+
+        .pricing-intro {
+            max-width: 900px;
+            margin: 0 auto 4rem;
+            text-align: center;
+        }
+
+        .pricing-intro h2 {
+            font-size: 2.8em;
+            margin-bottom: 1rem;
+            color: var(--text-dark);
+        }
+
+        .pricing-intro p {
+            font-size: 1.2em;
+            color: var(--text-light);
+            line-height: 1.8;
+        }
+
         .toggle-container {
             display: flex;
             justify-content: center;
             align-items: center;
             gap: 15px;
-            margin-bottom: 50px;
+            margin: 3rem 0;
             background: white;
             padding: 6px;
             border-radius: 50px;
@@ -82,7 +470,7 @@
             margin-right: auto;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }
-        
+
         .toggle-label {
             font-size: 1em;
             font-weight: 600;
@@ -92,12 +480,12 @@
             border-radius: 50px;
             transition: all 0.3s;
         }
-        
+
         .toggle-label.active {
             color: white;
             background: #2d1154;
         }
-        
+
         .savings-badge {
             display: inline-block;
             background: #2d1154;
@@ -110,17 +498,16 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        
-        /* Pricing Cards */
-        .pricing-cards { 
+
+        .pricing-cards {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 20px;
             max-width: 1400px;
             margin: 0 auto;
         }
-        
-        .card { 
+
+        .pricing-card {
             background: white;
             border-radius: 12px;
             box-shadow: 0 2px 12px rgba(0,0,0,0.06);
@@ -131,19 +518,19 @@
             display: flex;
             flex-direction: column;
         }
-        
-        .card:hover { 
+
+        .pricing-card:hover {
             transform: translateY(-4px);
             box-shadow: 0 8px 30px rgba(0,0,0,0.12);
             border-color: #2d1154;
         }
-        
-        .card.popular {
+
+        .pricing-card.popular {
             border-color: #ffd700;
             transform: scale(1.02);
             box-shadow: 0 4px 20px rgba(255, 215, 0, 0.15);
         }
-        
+
         .popular-badge {
             position: absolute;
             top: -12px;
@@ -158,69 +545,39 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        
-        .card-header {
-            text-align: left;
-            margin-bottom: 25px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-        
-        .plan-title-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 10px;
-        }
-        
-        .card h2 { 
-            color: #1a1a1a;
+
+        .pricing-card h3 {
             font-size: 1.1em;
-            margin: 0;
+            margin-bottom: 1rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
+            color: #1a1a1a;
         }
-        
-        .card-description {
-            color: #666;
-            font-size: 0.95em;
-            margin: 0;
-        }
-        
-        .price-container {
-            text-align: left;
-            margin-bottom: 25px;
-        }
-        
-        .real-price { 
-            display: none;
-        }
-        
-        .price { 
+
+        .price {
             font-size: 3.2em;
             font-weight: 800;
             color: #2d1154;
             line-height: 1;
             display: flex;
             align-items: flex-start;
-            justify-content: flex-start;
             gap: 3px;
             margin-bottom: 8px;
         }
-        
+
         .price .currency {
             font-size: 0.5em;
             margin-top: 8px;
         }
-        
+
         .price .period {
             font-size: 0.35em;
             color: #666;
             margin-top: 20px;
             font-weight: 500;
         }
-        
+
         .discount-badge {
             display: inline-block;
             background: #ffd700;
@@ -231,23 +588,16 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.3px;
+            margin-bottom: 1rem;
         }
-        
-        .transaction-fee {
-            color: #999;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-        
-        /* Features List */
-        .features { 
+
+        .pricing-features {
             list-style: none;
-            margin: 0 0 25px 0;
-            padding: 0;
+            margin: 1.5rem 0;
             flex-grow: 1;
         }
-        
-        .features li { 
+
+        .pricing-features li {
             padding: 10px 0;
             color: #666;
             font-size: 0.95em;
@@ -255,13 +605,11 @@
             align-items: center;
             gap: 10px;
         }
-        
-        .features li::before { 
+
+        .pricing-features li::before {
             content: '✓';
             color: #2d1154;
             font-weight: bold;
-            font-size: 1.1em;
-            flex-shrink: 0;
             width: 18px;
             height: 18px;
             background: #f0e6ff;
@@ -270,58 +618,20 @@
             align-items: center;
             justify-content: center;
             font-size: 0.8em;
+            flex-shrink: 0;
         }
-        
-        .features li.disabled {
-            color: #ccc;
-        }
-        
-        .features li.disabled::before {
-            content: '×';
-            color: #ccc;
-            background: #f5f5f5;
-        }
-        
-        /* Button */
-        .start-btn { 
-            display: block;
+
+        .pricing-card .btn-primary {
             width: 100%;
-            padding: 14px;
             background: #2d1154;
-            color: white;
-            text-align: center;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1em;
-            font-weight: 600;
             margin-top: auto;
-            transition: all 0.3s;
+            text-align: center;
         }
-        
-        .start-btn:hover { 
-            background: #1f0b3a;
-            transform: translateY(-2px);
-        }
-        
-        .start-btn:active {
-            transform: translateY(0);
-        }
-        
-        .start-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .card.popular .start-btn {
+
+        .pricing-card.popular .btn-primary {
             background: #e91e63;
         }
-        
-        .card.popular .start-btn:hover {
-            background: #c2185b;
-        }
-        
+
         /* Modal Styles */
         .modal { 
             display: none;
@@ -397,7 +707,7 @@
         }
         
         /* Form Styles */
-        label {
+        .modal-body label {
             display: block;
             color: #4a5568;
             font-weight: 600;
@@ -405,10 +715,10 @@
             font-size: 0.95em;
         }
         
-        input[type="text"], 
-        input[type="email"], 
-        input[type="password"],
-        select { 
+        .modal-body input[type="text"], 
+        .modal-body input[type="email"], 
+        .modal-body input[type="password"],
+        .modal-body select { 
             width: 100%;
             padding: 14px 16px;
             margin-bottom: 20px;
@@ -419,7 +729,8 @@
             font-family: inherit;
         }
         
-        input:focus, select:focus {
+        .modal-body input:focus, 
+        .modal-body select:focus {
             outline: none;
             border-color: #2d1154;
             box-shadow: 0 0 0 3px rgba(45, 17, 84, 0.1);
@@ -469,57 +780,375 @@
         
         /* Timer Button */
         .timer-btn {
-            background-color: #e2e8f0;
-            color: #718096;
+            background-color: #e2e8f0 !important;
+            color: #718096 !important;
         }
         
         .timer-btn:disabled {
             opacity: 1;
         }
-        
+
+        /* Footer */
+        .footer {
+            background: var(--text-dark);
+            color: white;
+            padding: 60px 2rem 30px;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            gap: 3rem;
+            margin-bottom: 3rem;
+        }
+
+        .footer-brand h3 {
+            font-size: 2em;
+            margin-bottom: 1rem;
+        }
+
+        .footer-brand p {
+            opacity: 0.8;
+            line-height: 1.8;
+        }
+
+        .footer-links h4 {
+            margin-bottom: 1.5rem;
+            font-size: 1.1em;
+        }
+
+        .footer-links ul {
+            list-style: none;
+        }
+
+        .footer-links li {
+            margin-bottom: 0.8rem;
+        }
+
+        .footer-links a {
+            color: white;
+            text-decoration: none;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+
+        .footer-links a:hover {
+            opacity: 1;
+        }
+
+        .footer-bottom {
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            opacity: 0.7;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
-            header h1 { font-size: 2em; }
-            header p { font-size: 1em; }
-            .section-header h2 { font-size: 1.8em; }
-            .pricing-cards { grid-template-columns: 1fr; }
-            .card { padding: 30px 25px; }
-            .price { font-size: 2.8em; }
-            .modal-content { width: 95%; margin: 10% auto; }
+            .mobile-toggle {
+                display: flex;
+            }
+
+            .nav-menu {
+                position: absolute;
+                top: 100%;
+                left: -100%;
+                width: 100%;
+                background: white;
+                flex-direction: column;
+                padding: 2rem;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                transition: left 0.3s;
+            }
+
+            .nav-menu.active {
+                left: 0;
+            }
+
+            .hero h1 {
+                font-size: 2.2em;
+            }
+
+            .hero p {
+                font-size: 1.1em;
+            }
+
+            .about-content {
+                grid-template-columns: 1fr;
+            }
+
+            .footer-content {
+                grid-template-columns: 1fr;
+            }
+
+            .section-title {
+                font-size: 2em;
+            }
         }
     </style>
 </head>
 <body>
 
-<header>
-    <div class="container">
-        <h1>Grow with fewer tools and lower fees</h1>
-        <p>Pay for one software subscription instead of five. No contracts. No per user fees.</p>
-    </div>
-</header>
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <div class="logo">TriageAI</div>
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="#home">Home</a></li>
+                <li><a href="#product">Product</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="#contact">Contact</a></li>
+                <li><button class="cta-button" onclick="location.href='#pricing'">Get Started</button></li>
+            </ul>
+            <div class="mobile-toggle" id="mobileToggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
 
-<div class="container pricing-section">
-    <div class="section-header">
-        <h2>PRICING</h2>
-        
+    <!-- Hero Section -->
+    <section class="hero" id="home">
+        <div class="hero-content">
+            <h1>Transform Your Lead Management with AI-Powered WhatsApp Automation</h1>
+            <p>Capture, track, and convert leads instantly through WhatsApp. No complex setup, no learning curve—just intelligent automation that works.</p>
+            <div class="hero-buttons">
+                <a href="#pricing" class="btn-primary">Start Free Trial</a>
+                <a href="#product" class="btn-secondary">Learn More</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Product Section -->
+    <section class="product-section" id="product">
+        <div class="section-header">
+            <div class="section-tag">PRODUCT</div>
+            <h2 class="section-title">Complete Lead Management Suite via WhatsApp</h2>
+            <p class="section-description">TriageAI revolutionizes how businesses manage leads by bringing powerful CRM capabilities directly to WhatsApp—the platform your customers already use daily.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h3>AI-Powered Lead Capture</h3>
+                <p>Simply send lead information via WhatsApp message, and our advanced Gemini AI instantly extracts name, phone, status, source, and follow-up requirements—no forms, no data entry.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📅</div>
+                <h3>Smart Follow-Up System</h3>
+                <p>Schedule follow-ups using natural language like "call tomorrow at 3pm" or "follow up next Monday morning." Receive automatic reminders 15 minutes before each scheduled call.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">👥</div>
+                <h3>Team Collaboration</h3>
+                <p>Multi-agent architecture allows your entire team to manage leads collaboratively. Admins get full visibility while agents maintain their personal lead pipelines.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Real-Time Reports</h3>
+                <p>Generate comprehensive reports in text, Excel, or PDF formats with custom date ranges. Get daily summaries automatically delivered at 8 PM IST with key metrics.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h3>Role-Based Access Control</h3>
+                <p>Secure company data with granular permissions. Admins see all company leads while individual agents access only their assigned prospects.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Instant Lead Updates</h3>
+                <p>Update lead status, add notes, reschedule follow-ups, or mark tasks complete—all through simple WhatsApp commands. No app switching required.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔍</div>
+                <h3>Advanced Search & Filter</h3>
+                <p>Find any lead instantly by name, phone, status, or keyword. Search across your personal leads or your entire company database (admin only).</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📈</div>
+                <h3>Pipeline Visualization</h3>
+                <p>Track lead progression through stages: New → Hot → Follow-Up → Converted. See your sales pipeline status at a glance with real-time counts.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3>Duplicate Detection</h3>
+                <p>Automatically identifies duplicate leads by phone number across your organization, preventing redundant outreach and maintaining data quality.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section class="about-section" id="about">
+        <div class="about-content">
+            <div class="about-text">
+                <div class="section-tag">ABOUT US</div>
+                <h2>Built by Passionate IT Professionals</h2>
+                <p>TriageAI was founded by two dedicated IT professionals who experienced firsthand the frustration of juggling multiple tools for lead management. After spending years in the industry, we noticed a common pain point: sales teams were losing valuable time switching between CRM systems, spreadsheets, and messaging apps.</p>
+                <p>Our vision was simple yet powerful—bring sophisticated lead management directly into WhatsApp, the world's most popular messaging platform. We combined our expertise in AI, cloud architecture, and enterprise software to create a solution that eliminates complexity while maximizing productivity.</p>
+                <p>Today, TriageAI empowers businesses of all sizes to capture more leads, never miss a follow-up, and close deals faster—all through the simplicity of WhatsApp messaging.</p>
+                <div class="about-stats">
+                    <div class="stat-box">
+                        <div class="stat-number">2</div>
+                        <div class="stat-label">Founders</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-number">100%</div>
+                        <div class="stat-label">Dedicated</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-number">24/7</div>
+                        <div class="stat-label">Support</div>
+                    </div>
+                </div>
+            </div>
+            <div class="about-image">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Our Mission</h3>
+                    <p>To make enterprise-grade lead management accessible to every business through intuitive WhatsApp automation, eliminating the barriers of cost, complexity, and training time.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💡</div>
+                    <h3>Our Vision</h3>
+                    <p>To become the world's leading conversational CRM platform, empowering millions of sales professionals to focus on building relationships instead of managing data.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Partners Section -->
+    <section class="partners-section">
+        <div class="section-header">
+            <div class="section-tag">TRUSTED BY</div>
+            <h2 class="section-title">Leading Companies Choose TriageAI</h2>
+        </div>
+        <div class="partners-track">
+            <div class="partner-logo">TechCorp Solutions</div>
+            <div class="partner-logo">Global Ventures</div>
+            <div class="partner-logo">Innovate Digital</div>
+            <div class="partner-logo">Swift Enterprises</div>
+            <div class="partner-logo">Quantum Systems</div>
+            <div class="partner-logo">Nexus Group</div>
+            <!-- Duplicate for seamless loop -->
+            <div class="partner-logo">TechCorp Solutions</div>
+            <div class="partner-logo">Global Ventures</div>
+            <div class="partner-logo">Innovate Digital</div>
+            <div class="partner-logo">Swift Enterprises</div>
+            <div class="partner-logo">Quantum Systems</div>
+            <div class="partner-logo">Nexus Group</div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section class="testimonials-section" id="testimonials">
+        <div class="section-header">
+            <div class="section-tag">TESTIMONIALS</div>
+            <h2 class="section-title">What Our Clients Say</h2>
+            <p class="section-description">Discover how businesses are transforming their sales process with TriageAI</p>
+        </div>
+
+        <div class="testimonials-grid">
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"TriageAI has completely transformed how our sales team operates. We've reduced response time by 80% and never miss a follow-up. The WhatsApp integration is genius—our team was up and running in minutes."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">RS</div>
+                    <div class="author-info">
+                        <h4>Rajesh Sharma</h4>
+                        <p>Sales Director, TechCorp Solutions</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"The AI-powered lead extraction is incredibly accurate. I can forward client inquiries directly from email to WhatsApp, and TriageAI handles the rest. It's like having a virtual assistant that never sleeps."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">PK</div>
+                    <div class="author-info">
+                        <h4>Priya Kapoor</h4>
+                        <p>Founder, Digital Growth Agency</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"Managing a team of 10 agents was chaotic before TriageAI. Now I have complete visibility into our pipeline, and automatic reports save me hours every week. Best investment we've made this year."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">AM</div>
+                    <div class="author-info">
+                        <h4>Amit Malhotra</h4>
+                        <p>CEO, Swift Enterprises</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"As a solo entrepreneur, TriageAI helps me punch above my weight. The follow-up reminders ensure I never let a hot lead go cold. It's like having a full CRM team at a fraction of the cost."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">SK</div>
+                    <div class="author-info">
+                        <h4>Sneha Kulkarni</h4>
+                        <p>Independent Consultant</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"The duplicate detection feature has saved us from embarrassing situations. Our team can now work confidently knowing they won't accidentally contact the same prospect twice."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">VN</div>
+                    <div class="author-info">
+                        <h4>Vikram Nair</h4>
+                        <p>Marketing Head, Global Ventures</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="testimonial-card">
+                <div class="quote-icon">"</div>
+                <p class="testimonial-text">"The reporting features are exceptional. I can generate custom reports in seconds and share them with stakeholders instantly. The PDF exports look professional and comprehensive."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">MR</div>
+                    <div class="author-info">
+                        <h4>Meera Reddy</h4>
+                        <p>Operations Manager, Innovate Digital</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing-section" id="pricing">
+        <div class="pricing-intro">
+            <div class="section-tag">PRICING</div>
+            <h2>Simple, Transparent Pricing</h2>
+            <p>Choose the perfect plan for your business. All plans include AI-powered lead capture, smart follow-ups, automated reminders, comprehensive reporting, and duplicate detection. Scale as you grow with no hidden fees.</p>
+        </div>
+
         <div class="toggle-container">
             <span class="toggle-label monthly-label active" onclick="toggleToMonthly()">Billed monthly</span>
             <span class="toggle-label annual-label" onclick="toggleToAnnual()">Billed yearly <span class="savings-badge">Save up to 25%</span></span>
         </div>
-    </div>
 
-    <div class="pricing-cards">
-        
-        <div class="card" data-plan="individual">
-            <div class="card-header">
-                <div class="plan-title-row">
-                    <h2>⭐ Individual</h2>
-                    <span class="discount-badge monthly-price">Save ₹120/yr</span>
-                    <span class="discount-badge annual-price" style="display:none;">Save ₹249/yr</span>
-                </div>
-            </div>
-            
-            <div class="price-container">
+        <div class="pricing-cards">
+            <div class="pricing-card">
+                <h3>⭐ Individual</h3>
                 <div class="price monthly-price">
                     <span class="currency">₹</span>
                     <span>299</span>
@@ -530,31 +1159,27 @@
                     <span>249</span>
                     <span class="period">/ month</span>
                 </div>
-                <div class="transaction-fee">+ 2% transaction fee</div>
+                <div class="discount-badge monthly-price">Save ₹120/yr</div>
+                <div class="discount-badge annual-price" style="display:none;">Save ₹249/yr</div>
+                
+                <ul class="pricing-features">
+                    <li>1 Agent Slot (Admin)</li>
+                    <li>Unlimited Leads & Follow-ups</li>
+                    <li>AI-Powered Lead Extraction</li>
+                    <li>Automated Follow-up Reminders</li>
+                    <li>Personalized Reports (Text/Excel/PDF)</li>
+                    <li>Daily Summary at 8 PM IST</li>
+                    <li>Smart Pipeline View</li>
+                    <li>Duplicate Lead Detection</li>
+                    <li>WhatsApp Command Interface</li>
+                </ul>
+                
+                <a href="#" class="btn-primary" onclick="event.preventDefault(); openSignup('individual')">Get started</a>
             </div>
-            
-            <ul class="features">
-                <li>1 Agent Slot (Admin)</li>
-                <li>Unlimited Leads & Follow-ups</li>
-                <li>Personalized Reports</li>
-                <li>Individual License Management</li>
-                <li class="disabled">Cannot add agents</li>
-            </ul>
-            
-            <button class="start-btn" onclick="openSignup('individual')">Get started</button>
-        </div>
 
-        <div class="card popular" data-plan="5user">
-            <div class="popular-badge">Start here and scale up 🚀</div>
-            <div class="card-header">
-                <div class="plan-title-row">
-                    <h2>👥 5-User Team</h2>
-                    <span class="discount-badge monthly-price">Save ₹240/yr</span>
-                    <span class="discount-badge annual-price" style="display:none;">Save ₹360/yr</span>
-                </div>
-            </div>
-            
-            <div class="price-container">
+            <div class="pricing-card popular">
+                <div class="popular-badge">Most Popular 🚀</div>
+                <h3>👥 5-User Team</h3>
                 <div class="price monthly-price">
                     <span class="currency">₹</span>
                     <span>1495</span>
@@ -565,33 +1190,26 @@
                     <span>1245</span>
                     <span class="period">/ month</span>
                 </div>
-                <div class="transaction-fee">+ 1% transaction fee</div>
+                <div class="discount-badge monthly-price">Save ₹240/yr</div>
+                <div class="discount-badge annual-price" style="display:none;">Save ₹360/yr</div>
+                
+                <ul class="pricing-features">
+                    <li>Up to 5 Agent Slots</li>
+                    <li>All Individual Plan Features</li>
+                    <li>Full Admin Dashboard Visibility</li>
+                    <li>Team Lead Pipeline View</li>
+                    <li>Company-wide Reporting</li>
+                    <li>Role-Based Access Control</li>
+                    <li>Agent Onboarding via OTP</li>
+                    <li>Shared Lead Database</li>
+                    <li>Priority Support</li>
+                </ul>
+                
+                <a href="#" class="btn-primary" onclick="event.preventDefault(); openSignup('5user')">Get started</a>
             </div>
-            
-            <ul class="features">
-                <li>Up to 5 Agent Slots</li>
-                <li>Unlimited team members</li>
-                <li>Membership Payments</li>
-                <li>Authentication</li>
-                <li>CRM</li>
-                <li>Email marketing</li>
-                <li>Help desk</li>
-                <li>Reporting</li>
-            </ul>
-            
-            <button class="start-btn" onclick="openSignup('5user')">Get started</button>
-        </div>
 
-        <div class="card" data-plan="10user">
-            <div class="card-header">
-                <div class="plan-title-row">
-                    <h2>🚀 10-User Pro</h2>
-                    <span class="discount-badge monthly-price">Save ₹1,200/yr</span>
-                    <span class="discount-badge annual-price" style="display:none;">Save ₹1,360/yr</span>
-                </div>
-            </div>
-            
-            <div class="price-container">
+            <div class="pricing-card">
+                <h3>🚀 10-User Pro</h3>
                 <div class="price monthly-price">
                     <span class="currency">₹</span>
                     <span>2990</span>
@@ -602,481 +1220,580 @@
                     <span>2490</span>
                     <span class="period">/ month</span>
                 </div>
-                <div class="transaction-fee">+ 1% transaction fee</div>
-            </div>
-            
-            <ul class="features">
-                <li>Up to 10 Agent Slots</li>
-                <li>Unlimited team members</li>
-                <li>Membership Payments</li>
-                <li>Authentication</li>
-                <li>CRM</li>
-                <li>Email marketing</li>
-                <li>Help desk</li>
-                <li>Reporting</li>
-            </ul>
-            
-            <button class="start-btn" onclick="openSignup('10user')">Get started</button>
-        </div>
-
-    </div>
-</div>
-
-<!-- Signup Modal -->
-<div id="signupModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="close" onclick="closeModal('signupModal')">&times;</span>
-            <h2>Create Your Account</h2>
-            <p style="color: #718096; margin-top: 8px; font-size: 0.95em;">
-                <span id="signupPlanName"></span>
-            </p>
-        </div>
-        <div class="modal-body">
-            <form id="signupForm">
-                <input type="hidden" id="selectedPlan" name="plan">
-                <input type="hidden" id="selectedDuration" name="duration" value="monthly">
+                <div class="discount-badge monthly-price">Save ₹1,200/yr</div>
+                <div class="discount-badge annual-price" style="display:none;">Save ₹1,360/yr</div>
                 
-                <label for="fullName">Full Name</label>
-                <input type="text" id="fullName" name="name" placeholder="John Doe" required>
+                <ul class="pricing-features">
+                    <li>Up to 10 Agent Slots</li>
+                    <li>All 5-User Team Features</li>
+                    <li>Advanced Team Analytics</li>
+                    <li>Custom Company Branding</li>
+                    <li>Bulk Lead Import/Export</li>
+                    <li>Extended Report History</li>
+                    <li>Dedicated Account Manager</li>
+                    <li>Custom Integration Support</li>
+                    <li>24/7 Priority Support</li>
+                </ul>
                 
-                <label for="waNumber">WhatsApp Number</label>
-                <div class="phone-input-group">
-                    <select id="countryCode" required>
-                        <option value="91" selected>🇮🇳 +91</option>
-                        <option value="1">🇺🇸 +1</option>
-                        <option value="44">🇬🇧 +44</option>
-                        <option value="61">🇦🇺 +61</option>
-                        <option value="60">🇲🇾 +60</option>
-                        <option value="65">🇸🇬 +65</option>
-                    </select>
-                    <input type="text" id="localNumber" name="local_phone" placeholder="9876543210" required>
-                </div>
-                <input type="hidden" id="waNumber" name="phone">
-
-                <label for="email">Email Address</label>
-                <input type="email" id="email" name="email" placeholder="john@example.com" required>
-                
-                <label for="companyName">Company Name <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
-                <input type="text" id="companyName" name="company_name" placeholder="Your Company">
-                
-                <button type="submit" class="start-btn" id="signupBtn">Continue to Verification</button>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- OTP Modal -->
-<div id="otpModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="close" onclick="closeModal('otpModal')">&times;</span>
-            <h2>Verify WhatsApp</h2>
-        </div>
-        <div class="modal-body">
-            <div id="otpMsg" class="alert alert-info">
-                A verification code has been sent to <strong id="otpPhoneDisplay"></strong>. Check your WhatsApp.
-            </div>
-            
-            <form id="otpForm">
-                <label for="otpCode">Enter OTP</label>
-                <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit code" required maxlength="6">
-                <button type="submit" class="start-btn" id="verifyOtpBtn">Verify OTP</button>
-            </form>
-            
-            <div style="text-align: center; margin-top: 20px;">
-                <button id="resendOtpBtn" class="start-btn timer-btn" style="width: auto; padding: 10px 20px; display: none;" disabled>
-                    Resend OTP (<span id="otpTimer">30</span>s)
-                </button>
+                <a href="#" class="btn-primary" onclick="event.preventDefault(); openSignup('10user')">Get started</a>
             </div>
         </div>
-    </div>
-</div>
+    </section>
 
-<!-- Billing Modal -->
-<div id="billingModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="close" onclick="closeModal('billingModal')">&times;</span>
-            <h2>Billing Information</h2>
+    <!-- Contact Section -->
+    <section class="product-section" id="contact">
+        <div class="section-header">
+            <div class="section-tag">CONTACT US</div>
+            <h2 class="section-title">Get in Touch</h2>
+            <p class="section-description">Have questions? We'd love to hear from you. Send us a message and we'll respond as soon as possible.</p>
         </div>
-        <div class="modal-body">
-            <form id="billingForm">
-                <label for="bAddress">Billing Address</label>
-                <input type="text" id="bAddress" name="billing_address" placeholder="123 Main Street" required>
-                
-                <label for="bCityCountry">City / Country</label>
-                <input type="text" id="bCityCountry" name="city_country" placeholder="Mumbai, India" required>
-                
-                <label for="gstNumber">GST/Tax Number <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
-                <input type="text" id="gstNumber" name="gst_number" placeholder="22AAAAA0000A1Z5">
-                
-                <button type="submit" class="start-btn" id="billingBtn">Continue to Payment</button>
-            </form>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📧</div>
+                <h3>Email</h3>
+                <p>support@triageai.com<br>sales@triageai.com</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">💬</div>
+                <h3>WhatsApp</h3>
+                <p>Try our bot directly:<br>+91 XXXX-XXXXXX</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">📍</div>
+                <h3>Location</h3>
+                <p>Bangalore, Karnataka<br>India</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <h3>TriageAI</h3>
+                <p>Transforming lead management through intelligent WhatsApp automation. Built by passionate IT professionals for businesses that want to close more deals.</p>
+            </div>
+
+            <div class="footer-links">
+                <h4>Product</h4>
+                <ul>
+                    <li><a href="#product">Features</a></li>
+                    <li><a href="#pricing">Pricing</a></li>
+                    <li><a href="#">Documentation</a></li>
+                    <li><a href="#">API</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-links">
+                <h4>Company</h4>
+                <ul>
+                    <li><a href="#about">About Us</a></li>
+                    <li><a href="#contact">Contact</a></li>
+                    <li><a href="#">Careers</a></li>
+                    <li><a href="#">Blog</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-links">
+                <h4>Legal</h4>
+                <ul>
+                    <li><a href="#">Privacy Policy</a></li>
+                    <li><a href="#">Terms of Service</a></li>
+                    <li><a href="#">Security</a></li>
+                    <li><a href="#">Cookie Policy</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <p>&copy; 2024 TriageAI. All rights reserved. Made with ❤️ in India</p>
+        </div>
+    </footer>
+
+    <!-- Signup Modal -->
+    <div id="signupModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal('signupModal')">&times;</span>
+                <h2>Create Your Account</h2>
+                <p style="color: #718096; margin-top: 8px; font-size: 0.95em;">
+                    <span id="signupPlanName"></span>
+                </p>
+            </div>
+            <div class="modal-body">
+                <form id="signupForm">
+                    <input type="hidden" id="selectedPlan" name="plan">
+                    <input type="hidden" id="selectedDuration" name="duration" value="monthly">
+                    
+                    <label for="fullName">Full Name</label>
+                    <input type="text" id="fullName" name="name" placeholder="John Doe" required>
+                    
+                    <label for="waNumber">WhatsApp Number</label>
+                    <div class="phone-input-group">
+                        <select id="countryCode" required>
+                            <option value="91" selected>🇮🇳 +91</option>
+                            <option value="1">🇺🇸 +1</option>
+                            <option value="44">🇬🇧 +44</option>
+                            <option value="61">🇦🇺 +61</option>
+                            <option value="60">🇲🇾 +60</option>
+                            <option value="65">🇸🇬 +65</option>
+                        </select>
+                        <input type="text" id="localNumber" name="local_phone" placeholder="9876543210" required>
+                    </div>
+                    <input type="hidden" id="waNumber" name="phone">
+
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" placeholder="john@example.com" required>
+                    
+                    <label for="companyName">Company Name <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
+                    <input type="text" id="companyName" name="company_name" placeholder="Your Company">
+                    
+                    <button type="submit" class="btn-primary" id="signupBtn" style="width: 100%; margin-top: 10px;">Continue to Verification</button>
+                </form>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- Payment Modal -->
-<div id="paymentModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span class="close" onclick="closeModal('paymentModal')">&times;</span>
-            <h2>Payment Summary</h2>
-        </div>
-        <div class="modal-body">
-            <div style="background: #f7fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                    <span style="color: #718096;">Plan:</span>
-                    <strong id="paymentPlan"></strong>
+    <!-- OTP Modal -->
+    <div id="otpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal('otpModal')">&times;</span>
+                <h2>Verify WhatsApp</h2>
+            </div>
+            <div class="modal-body">
+                <div id="otpMsg" class="alert alert-info">
+                    A verification code has been sent to <strong id="otpPhoneDisplay"></strong>. Check your WhatsApp.
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
-                    <span style="color: #718096;">Agent Slots:</span>
-                    <strong id="paymentAgents"></strong>
-                </div>
-                <div style="border-top: 2px solid #e2e8f0; margin: 15px 0; padding-top: 15px;"></div>
-                <div style="display: flex; justify-content: space-between; font-size: 1.3em;">
-                    <span style="color: #2d3748; font-weight: 600;">Total:</span>
-                    <strong id="paymentPrice" style="color: #075E54;"></strong>
+                
+                <form id="otpForm">
+                    <label for="otpCode">Enter OTP</label>
+                    <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit code" required maxlength="6">
+                    <button type="submit" class="btn-primary" id="verifyOtpBtn" style="width: 100%;">Verify OTP</button>
+                </form>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="resendOtpBtn" class="btn-primary timer-btn" style="width: auto; padding: 10px 20px; display: none;" disabled>
+                        Resend OTP (<span id="otpTimer">30</span>s)
+                    </button>
                 </div>
             </div>
-            
-            <p style="font-size: 0.9em; color: #a0aec0; text-align: center; margin-bottom: 20px;">
-                (Simulation mode - No actual payment will be processed)
-            </p>
-            
-            <button class="start-btn" onclick="simulatePaymentSuccess()" id="payNowBtn">Complete Payment (Demo)</button>
         </div>
     </div>
-</div>
 
-<script>
-    let globalRegistrationData = {
-        "individual": {
-            "agents": 1, 
-            "price_monthly": 299, 
-            "price_annual": 249 * 12,
-            "label": "Individual Plan", 
-            "key_monthly": "individual",
-            "key_annual": "individual_annual"
-        },
-        "5user": {
-            "agents": 5, 
-            "price_monthly": 1495, 
-            "price_annual": 1245 * 12, 
-            "label": "5-User Team Plan", 
-            "key_monthly": "5user_monthly", 
-            "key_annual": "5user_annual"
-        },
-        "10user": {
-            "agents": 10, 
-            "price_monthly": 2990, 
-            "price_annual": 2490 * 12, 
-            "label": "10-User Pro Plan", 
-            "key_monthly": "10user_monthly", 
-            "key_annual": "10user_annual"
-        },
-    };
+    <!-- Billing Modal -->
+    <div id="billingModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal('billingModal')">&times;</span>
+                <h2>Billing Information</h2>
+            </div>
+            <div class="modal-body">
+                <form id="billingForm">
+                    <label for="bAddress">Billing Address</label>
+                    <input type="text" id="bAddress" name="billing_address" placeholder="123 Main Street" required>
+                    
+                    <label for="bCityCountry">City / Country</label>
+                    <input type="text" id="bCityCountry" name="city_country" placeholder="Mumbai, India" required>
+                    
+                    <label for="gstNumber">GST/Tax Number <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
+                    <input type="text" id="gstNumber" name="gst_number" placeholder="22AAAAA0000A1Z5">
+                    
+                    <button type="submit" class="btn-primary" id="billingBtn" style="width: 100%;">Continue to Payment</button>
+                </form>
+            </div>
+        </div>
+    </div>
 
-    let checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
-    let resendTimer = 30;
-    let timerInterval;
+    <!-- Payment Modal -->
+    <div id="paymentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal('paymentModal')">&times;</span>
+                <h2>Payment Summary</h2>
+            </div>
+            <div class="modal-body">
+                <div style="background: #f7fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="color: #718096;">Plan:</span>
+                        <strong id="paymentPlan"></strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="color: #718096;">Agent Slots:</span>
+                        <strong id="paymentAgents"></strong>
+                    </div>
+                    <div style="border-top: 2px solid #e2e8f0; margin: 15px 0; padding-top: 15px;"></div>
+                    <div style="display: flex; justify-content: space-between; font-size: 1.3em;">
+                        <span style="color: #2d3748; font-weight: 600;">Total:</span>
+                        <strong id="paymentPrice" style="color: #2d1154;"></strong>
+                    </div>
+                </div>
+                
+                <p style="font-size: 0.9em; color: #a0aec0; text-align: center; margin-bottom: 20px;">
+                    (Simulation mode - No actual payment will be processed)
+                </p>
+                
+                <button class="btn-primary" onclick="simulatePaymentSuccess()" id="payNowBtn" style="width: 100%;">Complete Payment (Demo)</button>
+            </div>
+        </div>
+    </div>
 
-    function toggleToMonthly() {
-        document.querySelector('.monthly-label').classList.add('active');
-        document.querySelector('.annual-label').classList.remove('active');
-        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'block');
-        document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'none');
-        checkoutState.duration = 'monthly';
-    }
+    <script>
+        // Purchase Flow JavaScript
+        let globalRegistrationData = {
+            "individual": {
+                "agents": 1, 
+                "price_monthly": 299, 
+                "price_annual": 249 * 12,
+                "label": "Individual Plan", 
+                "key_monthly": "individual",
+                "key_annual": "individual_annual"
+            },
+            "5user": {
+                "agents": 5, 
+                "price_monthly": 1495, 
+                "price_annual": 1245 * 12, 
+                "label": "5-User Team Plan", 
+                "key_monthly": "5user_monthly", 
+                "key_annual": "5user_annual"
+            },
+            "10user": {
+                "agents": 10, 
+                "price_monthly": 2990, 
+                "price_annual": 2490 * 12, 
+                "label": "10-User Pro Plan", 
+                "key_monthly": "10user_monthly", 
+                "key_annual": "10user_annual"
+            },
+        };
 
-    function toggleToAnnual() {
-        document.querySelector('.monthly-label').classList.remove('active');
-        document.querySelector('.annual-label').classList.add('active');
-        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'none');
-        document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'block');
-        checkoutState.duration = 'annual';
-    }
+        let checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
+        let resendTimer = 30;
+        let timerInterval;
 
-    function togglePricing() {
-        if (checkoutState.duration === 'monthly') {
-            toggleToAnnual();
-        } else {
-            toggleToMonthly();
+        function openSignup(planKey) {
+            const plan = globalRegistrationData[planKey];
+            checkoutState.plan = planKey;
+            
+            const isAnnual = checkoutState.duration === 'annual';
+            const durationKey = isAnnual ? 'annual' : 'monthly';
+            
+            let totalPrice;
+            if (isAnnual) {
+                totalPrice = plan['price_annual'];
+                checkoutState.backend_key = plan['key_annual'];
+            } else {
+                totalPrice = plan['price_monthly'];
+                checkoutState.backend_key = plan['key_monthly'];
+            }
+            
+            checkoutState.price = totalPrice;
+
+            document.getElementById('signupPlanName').textContent = plan.label + ' - ' + (isAnnual ? 'Annual Billing' : 'Monthly Billing');
+            document.getElementById('selectedPlan').value = planKey;
+            document.getElementById('selectedDuration').value = durationKey;
+            
+            document.getElementById('signupModal').style.display = 'block';
         }
-    }
 
-    function openSignup(planKey) {
-        const plan = globalRegistrationData[planKey];
-        checkoutState.plan = planKey;
-        
-        const isAnnual = checkoutState.duration === 'annual';
-        const durationKey = isAnnual ? 'annual' : 'monthly';
-        
-        let totalPrice;
-        if (isAnnual) {
-            totalPrice = plan['price_annual'];
-            checkoutState.backend_key = plan['key_annual'];
-        } else {
-            totalPrice = plan['price_monthly'];
-            checkoutState.backend_key = plan['key_monthly'];
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+            if (id === 'otpModal' && timerInterval) {
+                clearInterval(timerInterval);
+            }
         }
         
-        checkoutState.price = totalPrice;
-
-        document.getElementById('signupPlanName').textContent = plan.label + ' - ' + (isAnnual ? 'Annual Billing' : 'Monthly Billing');
-        document.getElementById('selectedPlan').value = planKey;
-        document.getElementById('selectedDuration').value = durationKey;
-        
-        document.getElementById('signupModal').style.display = 'block';
-    }
-
-    function closeModal(id) {
-        document.getElementById(id).style.display = 'none';
-        if (id === 'otpModal' && timerInterval) {
-            clearInterval(timerInterval);
-        }
-    }
-    
-    function getCombinedPhoneNumber() {
-        const countryCode = document.getElementById('countryCode').value;
-        const localNumber = document.getElementById('localNumber').value.replace(/\D/g, '');
-        
-        if (localNumber.length < 8) {
-            alert("Please enter a valid local phone number (at least 8 digits).");
-            return null;
+        function getCombinedPhoneNumber() {
+            const countryCode = document.getElementById('countryCode').value;
+            const localNumber = document.getElementById('localNumber').value.replace(/\D/g, '');
+            
+            if (localNumber.length < 8) {
+                alert("Please enter a valid local phone number (at least 8 digits).");
+                return null;
+            }
+            
+            const fullNumber = countryCode + localNumber;
+            document.getElementById('waNumber').value = fullNumber;
+            return fullNumber;
         }
         
-        const fullNumber = countryCode + localNumber;
-        document.getElementById('waNumber').value = fullNumber;
-        return fullNumber;
-    }
-    
-    function startOtpTimer() {
-        if(timerInterval) clearInterval(timerInterval);
-        resendTimer = 30;
-        const resendBtn = document.getElementById('resendOtpBtn');
-        resendBtn.style.display = 'inline-block';
-        resendBtn.disabled = true;
-        resendBtn.classList.add('timer-btn');
-        document.getElementById('otpTimer').textContent = resendTimer;
-
-        timerInterval = setInterval(() => {
-            resendTimer--;
+        function startOtpTimer() {
+            if(timerInterval) clearInterval(timerInterval);
+            resendTimer = 30;
+            const resendBtn = document.getElementById('resendOtpBtn');
+            resendBtn.style.display = 'inline-block';
+            resendBtn.disabled = true;
+            resendBtn.classList.add('timer-btn');
             document.getElementById('otpTimer').textContent = resendTimer;
-            if (resendTimer <= 0) {
-                clearInterval(timerInterval);
-                resendBtn.disabled = false;
-                resendBtn.classList.remove('timer-btn');
-                resendBtn.textContent = 'Resend OTP';
-                resendBtn.onclick = resendOtp;
-            }
-        }, 1000);
-    }
-    
-    async function resendOtp() {
-        const resendBtn = document.getElementById('resendOtpBtn');
-        resendBtn.disabled = true;
-        resendBtn.textContent = 'Sending...';
 
-        try {
-            const formData = new FormData(document.getElementById('signupForm'));
-            formData.set('phone', checkoutState.phone); 
+            timerInterval = setInterval(() => {
+                resendTimer--;
+                document.getElementById('otpTimer').textContent = resendTimer;
+                if (resendTimer <= 0) {
+                    clearInterval(timerInterval);
+                    resendBtn.disabled = false;
+                    resendBtn.classList.remove('timer-btn');
+                    resendBtn.textContent = 'Resend OTP';
+                    resendBtn.onclick = resendOtp;
+                }
+            }, 1000);
+        }
+        
+        async function resendOtp() {
+            const resendBtn = document.getElementById('resendOtpBtn');
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
+
+            try {
+                const formData = new FormData(document.getElementById('signupForm'));
+                formData.set('phone', checkoutState.phone); 
+                const data = Object.fromEntries(formData.entries());
+
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    document.getElementById('otpMsg').className = 'alert alert-success';
+                    document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
+                    startOtpTimer();
+                } else {
+                    document.getElementById('otpMsg').className = 'alert alert-error';
+                    document.getElementById('otpMsg').innerHTML = '❌ Resend Failed: ' + result.message;
+                }
+            } catch (error) {
+                document.getElementById('otpMsg').className = 'alert alert-error';
+                document.getElementById('otpMsg').innerHTML = '❌ An unexpected error occurred during OTP resend.';
+            }
+        }
+        
+        function openOtpModal(phone) {
+            document.getElementById('otpPhoneDisplay').textContent = phone;
+            document.getElementById('otpMsg').className = 'alert alert-info';
+            document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
+            document.getElementById('otpCode').value = '';
+            document.getElementById('otpModal').style.display = 'block';
+            startOtpTimer();
+        }
+
+        document.getElementById('signupForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const fullPhone = getCombinedPhoneNumber();
+            if (!fullPhone) {
+                return;
+            }
+            
+            const signupBtn = document.getElementById('signupBtn');
+            signupBtn.disabled = true;
+            signupBtn.textContent = 'Processing...';
+            
+            const formData = new FormData(this);
+            formData.delete('local_phone');
+            formData.set('phone', fullPhone);
+            
             const data = Object.fromEntries(formData.entries());
+            checkoutState.phone = data.phone;
 
-            const response = await fetch('/api/register', {
-                method: 'POST',
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(data)
-            });
-            const result = await response.json();
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    closeModal('signupModal');
+                    openOtpModal(data.phone);
+                } else {
+                    alert('Registration Failed: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An unexpected error occurred during registration.');
+            } finally {
+                signupBtn.disabled = false;
+                signupBtn.textContent = 'Continue to Verification';
+            }
+        });
+
+        document.getElementById('otpForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const verifyBtn = document.getElementById('verifyOtpBtn');
+            verifyBtn.disabled = true;
+            verifyBtn.textContent = 'Verifying...';
             
-            if (result.status === 'success') {
-                document.getElementById('otpMsg').className = 'alert alert-success';
-                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
-                startOtpTimer();
-            } else {
+            const otp = document.getElementById('otpCode').value;
+            
+            try {
+                const response = await fetch('/api/verify_otp', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({"phone": checkoutState.phone, "otp": otp})
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    clearInterval(timerInterval);
+                    document.getElementById('otpMsg').className = 'alert alert-success';
+                    document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to billing...`;
+                    
+                    setTimeout(() => {
+                        closeModal('otpModal');
+                        document.getElementById('billingModal').style.display = 'block';
+                    }, 1000);
+                    
+                } else {
+                    document.getElementById('otpMsg').className = 'alert alert-error';
+                    document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
                 document.getElementById('otpMsg').className = 'alert alert-error';
-                document.getElementById('otpMsg').innerHTML = '❌ Resend Failed: ' + result.message;
+                document.getElementById('otpMsg').innerHTML = `❌ An unexpected error occurred.`;
+            } finally {
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = 'Verify OTP';
             }
-        } catch (error) {
-            document.getElementById('otpMsg').className = 'alert alert-error';
-            document.getElementById('otpMsg').innerHTML = '❌ An unexpected error occurred during OTP resend.';
-        }
-    }
-    
-    function openOtpModal(phone) {
-        document.getElementById('otpPhoneDisplay').textContent = phone;
-        document.getElementById('otpMsg').className = 'alert alert-info';
-        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
-        document.getElementById('otpCode').value = '';
-        document.getElementById('otpModal').style.display = 'block';
-        startOtpTimer();
-    }
+        });
 
-    document.getElementById('signupForm').addEventListener('submit', async function(event) {
-        event.preventDefault();
-        
-        const fullPhone = getCombinedPhoneNumber();
-        if (!fullPhone) {
-            return;
-        }
-        
-        const signupBtn = document.getElementById('signupBtn');
-        signupBtn.disabled = true;
-        signupBtn.textContent = 'Processing...';
-        
-        const formData = new FormData(this);
-        formData.delete('local_phone');
-        formData.set('phone', fullPhone);
-        
-        const data = Object.fromEntries(formData.entries());
-        checkoutState.phone = data.phone;
-
-        try {
-            const response = await fetch('/api/register', {
-                method: 'POST',
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(data)
-            });
-            const result = await response.json();
+        document.getElementById('billingForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const billingBtn = document.getElementById('billingBtn');
+            billingBtn.disabled = true;
+            billingBtn.textContent = 'Processing...';
             
-            if (result.status === 'success') {
-                closeModal('signupModal');
-                openOtpModal(data.phone);
-            } else {
-                alert('Registration Failed: ' + result.message);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An unexpected error occurred during registration.');
-        } finally {
-            signupBtn.disabled = false;
-            signupBtn.textContent = 'Continue to Verification';
-        }
-    });
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData.entries());
+            data.phone = checkoutState.phone;
 
-    document.getElementById('otpForm').addEventListener('submit', async function(event) {
-        event.preventDefault();
-        const verifyBtn = document.getElementById('verifyOtpBtn');
-        verifyBtn.disabled = true;
-        verifyBtn.textContent = 'Verifying...';
-        
-        const otp = document.getElementById('otpCode').value;
-        
-        try {
-            const response = await fetch('/api/verify_otp', {
-                method: 'POST',
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({"phone": checkoutState.phone, "otp": otp})
+            try {
+                const response = await fetch('/api/billing', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    closeModal('billingModal');
+                    
+                    const planDetails = globalRegistrationData[checkoutState.plan];
+                    const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
+                    
+                    document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
+                    document.getElementById('paymentAgents').textContent = planDetails.agents;
+                    document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + (checkoutState.duration === 'annual' ? ' (Annual)' : '');
+
+                    document.getElementById('paymentModal').style.display = 'block';
+                } else {
+                    alert('Billing Info Failed: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An unexpected error occurred during billing submission.');
+            } finally {
+                billingBtn.disabled = false;
+                billingBtn.textContent = 'Continue to Payment';
+            }
+        });
+
+        async function simulatePaymentSuccess() {
+            const payBtn = document.getElementById('payNowBtn');
+            payBtn.disabled = true;
+            payBtn.textContent = 'Processing Payment...';
+
+            try {
+                const response = await fetch('/api/purchase', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json", "Authorization": "Bearer web_auth_token_placeholder"},
+                    body: JSON.stringify({"plan": checkoutState.backend_key, "phone": checkoutState.phone})
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
+                    closeModal('paymentModal');
+                    window.location.href = '/';
+                } else {
+                    alert('❌ License Activation Failed: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An unexpected error occurred after payment.');
+            } finally {
+                payBtn.disabled = false;
+                payBtn.textContent = 'Complete Payment (Demo)';
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+                if (event.target.id === 'otpModal' && timerInterval) {
+                    clearInterval(timerInterval);
+                }
+            }
+        }
+
+        // Navigation and other existing scripts below...
+        const mobileToggle = document.getElementById('mobileToggle');
+        const navMenu = document.getElementById('navMenu');
+
+        mobileToggle.addEventListener('click', () => {
+            navMenu.classList.toggle('active');
+        });
+
+        // Navbar scroll effect
+        window.addEventListener('scroll', () => {
+            const navbar = document.getElementById('navbar');
+            if (window.scrollY > 50) {
+                navbar.classList.add('scrolled');
+            } else {
+                navbar.classList.remove('scrolled');
+            }
+        });
+
+        // Pricing Toggle
+        function toggleToMonthly() {
+            document.querySelector('.monthly-label').classList.add('active');
+            document.querySelector('.annual-label').classList.remove('active');
+            document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'block');
+            document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'none');
+        }
+
+        function toggleToAnnual() {
+            document.querySelector('.monthly-label').classList.remove('active');
+            document.querySelector('.annual-label').classList.add('active');
+            document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'block');
+        }
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                    // Close mobile menu if open
+                    navMenu.classList.remove('active');
+                }
             });
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                clearInterval(timerInterval);
-                document.getElementById('otpMsg').className = 'alert alert-success';
-                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to billing...`;
-                
-                setTimeout(() => {
-                    closeModal('otpModal');
-                    document.getElementById('billingModal').style.display = 'block';
-                }, 1000);
-                
-            } else {
-                document.getElementById('otpMsg').className = 'alert alert-error';
-                document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            document.getElementById('otpMsg').className = 'alert alert-error';
-            document.getElementById('otpMsg').innerHTML = `❌ An unexpected error occurred.`;
-        } finally {
-            verifyBtn.disabled = false;
-            verifyBtn.textContent = 'Verify OTP';
-        }
-    });
-
-    document.getElementById('billingForm').addEventListener('submit', async function(event) {
-        event.preventDefault();
-        const billingBtn = document.getElementById('billingBtn');
-        billingBtn.disabled = true;
-        billingBtn.textContent = 'Processing...';
-        
-        const formData = new FormData(this);
-        const data = Object.fromEntries(formData.entries());
-        data.phone = checkoutState.phone;
-
-        try {
-            const response = await fetch('/api/billing', {
-                method: 'POST',
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify(data)
-            });
-            const result = await response.json();
-
-            if (result.status === 'success') {
-                closeModal('billingModal');
-                
-                const planDetails = globalRegistrationData[checkoutState.plan];
-                const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
-                
-                document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
-                document.getElementById('paymentAgents').textContent = planDetails.agents;
-                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + (checkoutState.duration === 'annual' ? ' (Annual)' : '');
-
-                document.getElementById('paymentModal').style.display = 'block';
-            } else {
-                alert('Billing Info Failed: ' + result.message);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An unexpected error occurred during billing submission.');
-        } finally {
-            billingBtn.disabled = false;
-            billingBtn.textContent = 'Continue to Payment';
-        }
-    });
-
-    async function simulatePaymentSuccess() {
-        const payBtn = document.getElementById('payNowBtn');
-        payBtn.disabled = true;
-        payBtn.textContent = 'Processing Payment...';
-
-        try {
-            const response = await fetch('/api/purchase', {
-                method: 'POST',
-                headers: {"Content-Type": "application/json", "Authorization": "Bearer {{ web_auth_token }}"},
-                body: JSON.stringify({"plan": checkoutState.backend_key, "phone": checkoutState.phone})
-            });
-            
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
-                closeModal('paymentModal');
-                window.location.href = '{{ website_url }}';
-            } else {
-                alert('❌ License Activation Failed: ' + result.message);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('An unexpected error occurred after payment.');
-        } finally {
-            payBtn.disabled = false;
-            payBtn.textContent = 'Complete Payment (Demo)';
-        }
-    }
-
-    // Close modal when clicking outside
-    window.onclick = function(event) {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
-            if (event.target.id === 'otpModal' && timerInterval) {
-                clearInterval(timerInterval);
-            }
-        }
-    }
-</script>
+        });
+    </script>
 
 </body>
 </html>
