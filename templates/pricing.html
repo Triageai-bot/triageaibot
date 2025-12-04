@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TriageAI - Pricing & Purchase</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; }
+        .container { width: 90%; max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { background-color: #075E54; color: white; padding: 15px 0; text-align: center; }
+        header h1 { margin: 0; font-size: 2em; }
+        .pricing-section { padding: 50px 0; text-align: center; }
+        .toggle-switch { margin-bottom: 30px; }
+        .pricing-cards { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; }
+        .card { background-color: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 30px; width: 300px; transition: transform 0.3s, box-shadow 0.3s; text-align: left; }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 16px rgba(0,0,0,0.2); }
+        .card h2 { color: #075E54; margin-top: 0; }
+        .price { font-size: 2.5em; font-weight: bold; color: #128C7E; margin: 10px 0; }
+        .real-price { text-decoration: line-through; color: #888; font-size: 0.8em; display: block; }
+        .features li { margin-bottom: 10px; list-style: none; padding-left: 1.2em; text-indent: -1.2em; }
+        .features li::before { content: '✅ '; }
+        .start-btn { display: block; width: 100%; padding: 10px; background-color: #25D366; color: white; text-align: center; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; margin-top: 20px; transition: background-color 0.3s; }
+        .start-btn:hover { background-color: #1DA851; }
+        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 10px; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+        .close:hover, .close:focus { color: black; text-decoration: none; cursor: pointer; }
+        input[type="text"], input[type="email"], input[type="password"] { width: 100%; padding: 10px; margin: 8px 0; display: inline-block; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        
+        /* New style for combined phone input */
+        .phone-input-group { display: flex; }
+        .phone-input-group select { width: 30%; padding: 10px; margin: 8px 8px 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .phone-input-group input { width: 70%; padding: 10px; margin: 8px 0 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>TriageAI - Instant Lead Management via WhatsApp</h1>
+</header>
+
+<div class="container pricing-section">
+    <h2>Choose Your Plan - <span id="plan-duration">Monthly</span></h2>
+    <div class="toggle-switch">
+        <label>
+            <input type="checkbox" id="annual-toggle" onchange="togglePricing()"> Annual (2 months free!)
+        </label>
+    </div>
+
+    <div class="pricing-cards">
+        
+        <div class="card" data-plan="individual">
+            <h2>⭐ Individual Plan</h2>
+            <p class="real-price monthly-price">₹499/month</p>
+            <p class="real-price annual-price" style="display:none;">₹499/month</p>
+            <div class="price monthly-price">₹299<span style="font-size:0.5em;">/mo</span></div>
+            <div class="price annual-price" style="display:none;">₹249<span style="font-size:0.5em;">/mo</span></div>
+            <p>Perfect for solo entrepreneurs.</p>
+            <ul class="features">
+                <li>1 Agent Slot (Admin)</li>
+                <li>Unlimited Leads & Follow-ups</li>
+                <li>Personalized Reports</li>
+                <li>Individual License Management</li>
+                <li>*Cannot add agents</li>
+            </ul>
+            <button class="start-btn" onclick="openSignup('individual')">Start Individual Plan</button>
+        </div>
+
+        <div class="card" data-plan="5user">
+            <h2>👥 5-User Team</h2>
+            <p class="real-price monthly-price">₹2495/month</p>
+            <p class="real-price annual-price" style="display:none;">₹2495/month</p>
+            <div class="price monthly-price">₹1495<span style="font-size:0.5em;">/mo</span></div>
+            <div class="price annual-price" style="display:none;">₹1245<span style="font-size:0.5em;">/mo</span></div>
+            <p>The core solution for small teams.</p>
+            <ul class="features">
+                <li>Up to 5 Agent Slots (1 Admin + 4 Agents)</li>
+                <li>Full Admin Lead Visibility</li>
+                <li>Agent Role-Based Access Control</li>
+                <li>Team Reports & Pipeline</li>
+            </ul>
+            <button class="start-btn" onclick="openSignup('5user')">Start 5-User Plan</button>
+        </div>
+
+        <div class="card" data-plan="10user">
+            <h2>🚀 10-User Pro</h2>
+            <p class="real-price monthly-price">₹4990/month</p>
+            <p class="real-price annual-price" style="display:none;">₹4990/month</p>
+            <div class="price monthly-price">₹2990<span style="font-size:0.5em;">/mo</span></div>
+            <div class="price annual-price" style="display:none;">₹2490<span style="font-size:0.5em;">/mo</span></div>
+            <p>Scale your sales with advanced features.</p>
+            <ul class="features">
+                <li>Up to 10 Agent Slots</li>
+                <li>All 5-User Features</li>
+                <li>Priority Support</li>
+                <li>Custom Integrations (Future)</li>
+            </ul>
+            <button class="start-btn" onclick="openSignup('10user')">Start 10-User Plan</button>
+        </div>
+
+    </div>
+</div>
+
+<div id="signupModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('signupModal')">&times;</span>
+        <h2>Sign Up - <span id="signupPlanName"></span></h2>
+        <form id="signupForm">
+            <input type="hidden" id="selectedPlan" name="plan">
+            <input type="hidden" id="selectedDuration" name="duration" value="monthly">
+            <label for="fullName">Full Name</label>
+            <input type="text" id="fullName" name="name" required>
+            
+            <label for="waNumber">WhatsApp Number</label>
+            <div class="phone-input-group">
+                <select id="countryCode" required>
+                    <option value="91" selected>🇮🇳 +91 (India)</option>
+                    <option value="1">🇺🇸 +1 (USA/Can)</option>
+                    <option value="44">🇬🇧 +44 (UK)</option>
+                    <option value="61">🇦🇺 +61 (Aus)</option>
+                    <option value="60">🇲🇾 +60 (Malaysia)</option>
+                    <option value="65">🇸🇬 +65 (Singapore)</option>
+                </select>
+                <input type="text" id="localNumber" name="local_phone" placeholder="e.g., 9876543210" required title="Enter the local phone number digits.">
+            </div>
+            <input type="hidden" id="waNumber" name="phone">
+
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" required>
+            
+            <label for="companyName">Company Name (Optional for Individual)</label>
+            <input type="text" id="companyName" name="company_name">
+            
+            <button type="submit" class="start-btn" id="signupBtn">Proceed to OTP Verification</button>
+        </form>
+    </div>
+</div>
+
+<div id="otpModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('otpModal')">&times;</span>
+        <h2>Verify WhatsApp OTP</h2>
+        <p id="otpMsg">A verification code has been sent to <span id="otpPhoneDisplay"></span>. Check your WhatsApp.</p>
+        <form id="otpForm">
+            <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit OTP" required 
+                   title="Enter the 6-digit OTP sent to your WhatsApp">
+            <button type="submit" class="start-btn" id="verifyOtpBtn">Verify OTP</button>
+        </form>
+        <div style="text-align: center; margin-top: 15px;">
+            <button id="resendOtpBtn" class="start-btn" style="width: 50%; background-color: #888; display: none;" disabled>
+                Resend OTP (<span id="otpTimer">30</span>s)
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="billingModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('billingModal')">&times;</span>
+        <h2>Billing Information</h2>
+        <form id="billingForm">
+            <label for="bAddress">Billing Address</label>
+            <input type="text" id="bAddress" name="billing_address" required>
+            
+            <label for="bCityCountry">City/Country</label>
+            <input type="text" id="bCityCountry" name="city_country" required>
+            
+            <label for="gstNumber">GST/Tax Number (Optional)</label>
+            <input type="text" id="gstNumber" name="gst_number">
+            
+            <button type="submit" class="start-btn" id="billingBtn">Proceed to Payment</button>
+        </form>
+    </div>
+</div>
+
+<div id="paymentModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal('paymentModal')">&times;</span>
+        <h2>Payment Summary (Dummy)</h2>
+        <p>Plan: <span id="paymentPlan"></span></p>
+        <p>Agents: <span id="paymentAgents"></span></p>
+        <p>Total Price: <span id="paymentPrice"></span></p>
+        <p style="font-size: 0.9em; color: gray;">(Price is a simulation based on mock data)</p>
+        <button class="start-btn" onclick="simulatePaymentSuccess()" id="payNowBtn">Pay Now (MOCK SUCCESS)</button>
+    </div>
+</div>
+
+<script>
+    // Frontend mock details mapped to backend structure
+    let globalRegistrationData = {
+        "individual": {"agents": 1, "price_monthly": 299, "price_annual": 249, "label": "Individual (1 Agent)", "key_monthly": "individual", "key_annual": "individual"},
+        "5user": {"agents": 5, "price_monthly": 1495, "price_annual": 1245, "label": "5-User Team", "key_monthly": "5user_monthly", "key_annual": "5user_annual"},
+        "10user": {"agents": 10, "price_monthly": 2990, "price_annual": 2490, "label": "10-User Pro", "key_monthly": "10user_monthly", "key_annual": "10user_annual"},
+    };
+
+    let checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
+
+    let resendTimer = 30;
+    let timerInterval;
+
+    function togglePricing() {
+        const isAnnual = document.getElementById('annual-toggle').checked;
+        const duration = isAnnual ? 'annual' : 'monthly';
+        document.getElementById('plan-duration').textContent = isAnnual ? 'Annual' : 'Monthly';
+        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = isAnnual ? 'none' : 'block');
+        document.querySelectorAll('.annual-price').forEach(el => el.style.display = isAnnual ? 'block' : 'none');
+        
+        // Update checkout state duration
+        checkoutState.duration = duration;
+    }
+
+    function openSignup(planKey) {
+        const plan = globalRegistrationData[planKey];
+        checkoutState.plan = planKey;
+        
+        const isAnnual = document.getElementById('annual-toggle').checked;
+        const durationKey = isAnnual ? 'annual' : 'monthly';
+        
+        const pricePerMonth = plan['price_' + durationKey];
+        const totalPrice = pricePerMonth * (isAnnual ? 12 : 1);
+        
+        checkoutState.price = totalPrice;
+        checkoutState.backend_key = plan['key_' + durationKey];
+
+        document.getElementById('signupPlanName').textContent = plan.label + ' (' + (isAnnual ? 'Annual' : 'Monthly') + ')';
+        document.getElementById('selectedPlan').value = planKey;
+        document.getElementById('selectedDuration').value = durationKey;
+        
+        document.getElementById('signupModal').style.display = 'block';
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).style.display = 'none';
+        if (id === 'otpModal' && timerInterval) {
+            clearInterval(timerInterval); // Stop timer when modal closes
+        }
+    }
+    
+    // NEW: Function to combine country code and local number
+    function getCombinedPhoneNumber() {
+        const countryCode = document.getElementById('countryCode').value;
+        const localNumber = document.getElementById('localNumber').value.replace(/\D/g, ''); // Remove non-digits
+        
+        if (localNumber.length < 8) { // Basic validation check (8 digits minimum for local part)
+            alert("Please enter a valid local phone number (at least 8 digits).");
+            return null;
+        }
+        
+        const fullNumber = countryCode + localNumber;
+        document.getElementById('waNumber').value = fullNumber; // Set hidden field
+        return fullNumber;
+    }
+    
+    // NEW: OTP Timer Functions
+    function startOtpTimer() {
+        if(timerInterval) clearInterval(timerInterval);
+        resendTimer = 30; // Reset timer
+        document.getElementById('resendOtpBtn').style.display = 'block';
+        document.getElementById('resendOtpBtn').disabled = true;
+        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
+        document.getElementById('otpTimer').textContent = resendTimer;
+
+
+        timerInterval = setInterval(() => {
+            resendTimer--;
+            document.getElementById('otpTimer').textContent = resendTimer;
+            if (resendTimer <= 0) {
+                clearInterval(timerInterval);
+                document.getElementById('resendOtpBtn').disabled = false;
+                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54'; // Active color
+                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
+                document.getElementById('resendOtpBtn').onclick = resendOtp;
+            }
+        }, 1000);
+    }
+    
+    async function resendOtp() {
+        document.getElementById('resendOtpBtn').disabled = true;
+        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
+        document.getElementById('resendOtpBtn').textContent = 'Sending...';
+
+        try {
+            // Simulate resending the registration request to generate a new OTP
+            const formData = new FormData(document.getElementById('signupForm'));
+            formData.set('phone', checkoutState.phone); 
+            
+            const data = Object.fromEntries(formData.entries());
+
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
+                startOtpTimer();
+            } else {
+                alert('Resend Failed: ' + result.message);
+            }
+        } catch (error) {
+            alert('An unexpected error occurred during OTP resend.');
+        } finally {
+            if (resendTimer <= 0) { // Only re-enable if timer finished before submission
+                document.getElementById('resendOtpBtn').disabled = false;
+                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54';
+                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
+            }
+        }
+    }
+    
+    function openOtpModal(phone) {
+        document.getElementById('otpPhoneDisplay').textContent = phone;
+        document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
+        document.getElementById('otpCode').value = ''; // Clear previous OTP
+        document.getElementById('otpModal').style.display = 'block';
+        startOtpTimer(); // Start the timer when the modal opens
+    }
+
+    document.getElementById('signupForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        
+        const fullPhone = getCombinedPhoneNumber();
+        if (!fullPhone) {
+            document.getElementById('signupBtn').disabled = false;
+            return;
+        }
+        
+        document.getElementById('signupBtn').disabled = true;
+        
+        // Ensure the data sent includes the combined phone number
+        const formData = new FormData(this);
+        formData.delete('local_phone'); // Remove the split field
+        formData.set('phone', fullPhone); // Add the combined field
+        
+        const data = Object.fromEntries(formData.entries());
+        checkoutState.phone = data.phone; // Update checkout state
+
+        try {
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                closeModal('signupModal');
+                openOtpModal(data.phone); // Use the new function
+            } else {
+                alert('Registration Failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred during registration.');
+        } finally {
+            document.getElementById('signupBtn').disabled = false;
+        }
+    });
+
+    document.getElementById('otpForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        document.getElementById('verifyOtpBtn').disabled = true;
+        const otp = document.getElementById('otpCode').value;
+        
+        try {
+            const response = await fetch('/api/verify_otp', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({"phone": checkoutState.phone, "otp": otp})
+            });
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                clearInterval(timerInterval); // Stop timer
+                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to Billing in 1 second.`;
+                document.getElementById('verifyOtpBtn').style.backgroundColor = '#1DA851';
+                
+                setTimeout(() => {
+                    closeModal('otpModal');
+                    document.getElementById('billingModal').style.display = 'block';
+                }, 1000); // 1 second delay
+                
+            } else {
+                document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('otpMsg').innerHTML = `❌ An unexpected error occurred.`;
+        } finally {
+            document.getElementById('verifyOtpBtn').disabled = false;
+        }
+    });
+
+    document.getElementById('billingForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        document.getElementById('billingBtn').disabled = true;
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData.entries());
+        data.phone = checkoutState.phone;
+
+        try {
+            const response = await fetch('/api/billing', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                closeModal('billingModal');
+                
+                // Prepare payment modal data
+                const planDetails = globalRegistrationData[checkoutState.plan];
+                const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
+                
+                document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
+                document.getElementById('paymentAgents').textContent = planDetails.agents;
+                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price + (checkoutState.duration === 'annual' ? ' (Annual Total)' : ' (Monthly)');
+
+                document.getElementById('paymentModal').style.display = 'block';
+            } else {
+                alert('Billing Info Failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred during billing submission.');
+        } finally {
+            document.getElementById('billingBtn').disabled = false;
+        }
+    });
+
+    async function simulatePaymentSuccess() {
+        document.getElementById('payNowBtn').disabled = true;
+        alert("Simulating successful payment...");
+
+        try {
+            const response = await fetch('/api/purchase', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json", "Authorization": "Bearer {{ web_auth_token }}"},
+                body: JSON.stringify({"plan": checkoutState.backend_key, "phone": checkoutState.phone})
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
+                closeModal('paymentModal');
+                window.location.href = '{{ website_url }}'; // Go back to the main page or success page
+            } else {
+                alert('❌ License Activation Failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred after payment.');
+        } finally {
+            document.getElementById('payNowBtn').disabled = false;
+        }
+    }
+</script>
+
+</body>
+</html>

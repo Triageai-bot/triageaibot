@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TriageAI - Renew License</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; text-align: center; }
+        .container { width: 90%; max-width: 600px; margin: 50px auto; padding: 30px; background-color: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #075E54; }
+        .details p { margin: 5px 0; text-align: left; }
+        .details strong { color: #128C7E; }
+        .pricing-toggle { margin: 20px 0; }
+        .price { font-size: 2.0em; font-weight: bold; color: #128C7E; margin: 10px 0; }
+        .start-btn { display: block; width: 100%; padding: 12px; background-color: #25D366; color: white; text-align: center; border: none; border-radius: 5px; cursor: pointer; font-size: 1.2em; margin-top: 20px; transition: background-color 0.3s; }
+        .start-btn:hover { background-color: #1DA851; }
+        .monthly-card, .annual-card { padding: 15px; border: 2px solid #ccc; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }
+        .selected-plan { border-color: #128C7E !important; background-color: #e6ffed; }
+        .modal { display: none; position: fixed; z-index: 10; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>TriageAI License Renewal</h1>
+    <div class="details">
+        <p>Company: <strong>{{ renewal_data.name }}</strong></p>
+        <p>Admin Name: <strong>{{ renewal_data.wa_admin_name }}</strong></p>
+        <p>WhatsApp Admin: <strong>{{ renewal_data.phone }}</strong></p>
+        <p>Current Plan: <strong>{{ renewal_data.plan_name }}</strong></p>
+        <p>Expiration Date: <strong>{{ renewal_data.expired_at }}</strong></p>
+    </div>
+
+    <div class="pricing-toggle">
+        <h2>Select Renewal Duration</h2>
+        
+        <div id="monthlyPlan" class="monthly-card selected-plan" onclick="selectDuration('monthly')">
+            <h3>Monthly Renewal</h3>
+            <p style="font-size:0.8em; color:#888;">Monthly Rate</p>
+            <div class="price">₹{{ renewal_data.price_monthly }}<span style="font-size:0.5em;">/mo</span></div>
+        </div>
+
+        <div id="annualPlan" class="annual-card" onclick="selectDuration('annual')">
+            <h3>Annual Renewal (Save 2 Months)</h3>
+            <p style="font-size:0.8em; color:#888;">Equivalent to ₹{{ renewal_data.annual_per_month_display }}/month</p>
+            <div class="price">₹{{ renewal_data.price_annual }}<span style="font-size:0.5em;">/yr total</span></div>
+        </div>
+    </div>
+    
+    <button class="start-btn" id="renewBtn" onclick="simulateRenewalPayment()">Proceed to Pay: <span id="paymentSummary">₹{{ renewal_data.price_monthly }} (Monthly)</span></button>
+</div>
+
+<div id="successModal" class="modal">
+    <div class="modal-content">
+        <h2>🎉 Payment Successful!</h2>
+        <p>Your TriageAI license has been successfully renewed.</p>
+        <p>You will receive a confirmation message on your WhatsApp shortly.</p>
+        <button class="start-btn" onclick="document.getElementById('successModal').style.display = 'none'; window.location.href = '/';" style="width: auto;">Close & Back to Main</button>
+    </div>
+</div>
+
+<script>
+    let renewalState = { 
+        "duration": "monthly", 
+        "token": "{{ token }}",
+        "phone": "{{ renewal_data.phone }}",
+        "basePlan": "{{ renewal_data.base_plan }}",
+        "priceMonthly": {{ renewal_data.price_monthly }},
+        "priceAnnual": {{ renewal_data.price_annual }},
+    };
+
+    function selectDuration(duration) {
+        renewalState.duration = duration;
+        document.getElementById('monthlyPlan').classList.remove('selected-plan');
+        document.getElementById('annualPlan').classList.remove('selected-plan');
+        
+        let price, label;
+        if (duration === 'monthly') {
+            document.getElementById('monthlyPlan').classList.add('selected-plan');
+            price = renewalState.priceMonthly;
+            label = `₹${price} (Monthly)`;
+        } else {
+            document.getElementById('annualPlan').classList.add('selected-plan');
+            price = renewalState.priceAnnual;
+            label = `₹${price} (Annual Total)`;
+        }
+        document.getElementById('paymentSummary').textContent = label;
+    }
+
+    async function simulateRenewalPayment() {
+        document.getElementById('renewBtn').disabled = true;
+        document.getElementById('renewBtn').textContent = 'Processing Payment...';
+
+        alert("Simulating successful payment for renewal...");
+        
+        // Determine the backend key for the chosen duration
+        let backendKey = renewalState.basePlan + (renewalState.duration === 'monthly' ? '_monthly' : '_annual');
+        
+        // Handle individual plan key which is just 'individual'
+        if (renewalState.basePlan === 'individual') {
+             backendKey = 'individual';
+        }
+        
+        try {
+            const response = await fetch('/api/renewal_purchase', {
+                method: 'POST',
+                headers: {"Content-Type": "application/json", "Authorization": "Bearer {{ web_auth_token }}"},
+                body: JSON.stringify({
+                    "token": renewalState.token, // Send token for validation
+                    "phone": renewalState.phone, // Send phone as safeguard
+                    "plan": backendKey // Send the new plan key
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                document.getElementById('successModal').style.display = 'block';
+                // NOTE: The token cleanup is handled in the backend upon successful renewal.
+            } else {
+                alert('❌ Renewal Failed: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred during renewal purchase.');
+        } finally {
+            document.getElementById('renewBtn').disabled = false;
+            document.getElementById('renewBtn').textContent = 'Proceed to Pay: ' + document.getElementById('paymentSummary').textContent;
+        }
+    }
+</script>
+
+</body>
+</html>
