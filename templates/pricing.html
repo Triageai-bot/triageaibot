@@ -5,202 +5,766 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TriageAI - Pricing & Purchase</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; }
-        .container { width: 90%; max-width: 1200px; margin: 0 auto; padding: 20px; }
-        header { background-color: #075E54; color: white; padding: 15px 0; text-align: center; }
-        header h1 { margin: 0; font-size: 2em; }
-        .pricing-section { padding: 50px 0; text-align: center; }
-        .toggle-switch { margin-bottom: 30px; }
-        .pricing-cards { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; }
-        .card { background-color: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 30px; width: 300px; transition: transform 0.3s, box-shadow 0.3s; text-align: left; }
-        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 16px rgba(0,0,0,0.2); }
-        .card h2 { color: #075E54; margin-top: 0; }
-        .price { font-size: 2.5em; font-weight: bold; color: #128C7E; margin: 10px 0; }
-        .real-price { text-decoration: line-through; color: #888; font-size: 0.8em; display: block; }
-        .features li { margin-bottom: 10px; list-style: none; padding-left: 1.2em; text-indent: -1.2em; }
-        .features li::before { content: '✅ '; }
-        .start-btn { display: block; width: 100%; padding: 10px; background-color: #25D366; color: white; text-align: center; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; margin-top: 20px; transition: background-color 0.3s; }
-        .start-btn:hover { background-color: #1DA851; }
-        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
-        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 10px; }
-        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
-        .close:hover, .close:focus { color: black; text-decoration: none; cursor: pointer; }
-        input[type="text"], input[type="email"], input[type="password"] { width: 100%; padding: 10px; margin: 8px 0; display: inline-block; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        /* New style for combined phone input */
-        .phone-input-group { display: flex; }
-        .phone-input-group select { width: 30%; padding: 10px; margin: 8px 8px 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .phone-input-group input { width: 70%; padding: 10px; margin: 8px 0 8px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #ffffff;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }
+        
+        .container { 
+            width: 90%; 
+            max-width: 1400px; 
+            margin: 0 auto; 
+            padding: 20px; 
+        }
+        
+        /* Header */
+        header { 
+            background: #ffffff;
+            color: #1a1a1a; 
+            padding: 80px 0 60px;
+            text-align: center;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        header h1 { 
+            font-size: 3.5em; 
+            font-weight: 800;
+            margin-bottom: 20px;
+            letter-spacing: -1.5px;
+            color: #2d1154;
+        }
+        
+        header p {
+            font-size: 1.3em;
+            color: #666;
+            max-width: 800px;
+            margin: 0 auto;
+            font-weight: 400;
+            line-height: 1.5;
+        }
+        
+        /* Pricing Section */
+        .pricing-section { 
+            padding: 60px 0 80px;
+            background: #fafafa;
+        }
+        
+        .section-header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .section-header h2 {
+            font-size: 0.95em;
+            color: #999;
+            margin-bottom: 40px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        /* Toggle Switch */
+        .toggle-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 50px;
+            background: white;
+            padding: 6px;
+            border-radius: 50px;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .toggle-label {
+            font-size: 1em;
+            font-weight: 600;
+            color: #666;
+            padding: 10px 24px;
+            cursor: pointer;
+            border-radius: 50px;
+            transition: all 0.3s;
+        }
+        
+        .toggle-label.active {
+            color: white;
+            background: #2d1154;
+        }
+        
+        .savings-badge {
+            display: inline-block;
+            background: #2d1154;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 700;
+            margin-left: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Pricing Cards */
+        .pricing-cards { 
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .card { 
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+            padding: 35px 30px;
+            transition: all 0.3s ease;
+            position: relative;
+            border: 2px solid #f0f0f0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .card:hover { 
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            border-color: #2d1154;
+        }
+        
+        .card.popular {
+            border-color: #ffd700;
+            transform: scale(1.02);
+            box-shadow: 0 4px 20px rgba(255, 215, 0, 0.15);
+        }
+        
+        .popular-badge {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ffd700;
+            color: #2d1154;
+            padding: 5px 18px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .card-header {
+            text-align: left;
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .plan-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        
+        .card h2 { 
+            color: #1a1a1a;
+            font-size: 1.1em;
+            margin: 0;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .card-description {
+            color: #666;
+            font-size: 0.95em;
+            margin: 0;
+        }
+        
+        .price-container {
+            text-align: left;
+            margin-bottom: 25px;
+        }
+        
+        .real-price { 
+            display: none;
+        }
+        
+        .price { 
+            font-size: 3.2em;
+            font-weight: 800;
+            color: #2d1154;
+            line-height: 1;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            gap: 3px;
+            margin-bottom: 8px;
+        }
+        
+        .price .currency {
+            font-size: 0.5em;
+            margin-top: 8px;
+        }
+        
+        .price .period {
+            font-size: 0.35em;
+            color: #666;
+            margin-top: 20px;
+            font-weight: 500;
+        }
+        
+        .discount-badge {
+            display: inline-block;
+            background: #ffd700;
+            color: #2d1154;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .transaction-fee {
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        
+        /* Features List */
+        .features { 
+            list-style: none;
+            margin: 0 0 25px 0;
+            padding: 0;
+            flex-grow: 1;
+        }
+        
+        .features li { 
+            padding: 10px 0;
+            color: #666;
+            font-size: 0.95em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .features li::before { 
+            content: '✓';
+            color: #2d1154;
+            font-weight: bold;
+            font-size: 1.1em;
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            background: #f0e6ff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+        }
+        
+        .features li.disabled {
+            color: #ccc;
+        }
+        
+        .features li.disabled::before {
+            content: '×';
+            color: #ccc;
+            background: #f5f5f5;
+        }
+        
+        /* Button */
+        .start-btn { 
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background: #2d1154;
+            color: white;
+            text-align: center;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            margin-top: auto;
+            transition: all 0.3s;
+        }
+        
+        .start-btn:hover { 
+            background: #1f0b3a;
+            transform: translateY(-2px);
+        }
+        
+        .start-btn:active {
+            transform: translateY(0);
+        }
+        
+        .start-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .card.popular .start-btn {
+            background: #e91e63;
+        }
+        
+        .card.popular .start-btn:hover {
+            background: #c2185b;
+        }
+        
+        /* Modal Styles */
+        .modal { 
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .modal-content { 
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 550px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: slideDown 0.3s;
+        }
+        
+        @keyframes slideDown {
+            from { 
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to { 
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .modal-header {
+            padding: 30px 35px 20px;
+            border-bottom: 2px solid #f7fafc;
+            position: relative;
+        }
+        
+        .modal-header h2 {
+            color: #1a1a1a;
+            font-size: 1.6em;
+            font-weight: 700;
+        }
+        
+        .modal-body {
+            padding: 30px 35px 35px;
+        }
+        
+        .close { 
+            position: absolute;
+            right: 25px;
+            top: 25px;
+            color: #a0aec0;
+            font-size: 32px;
+            font-weight: 300;
+            cursor: pointer;
+            transition: color 0.3s;
+            line-height: 1;
+        }
+        
+        .close:hover { 
+            color: #2d3748;
+        }
+        
+        /* Form Styles */
+        label {
+            display: block;
+            color: #4a5568;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.95em;
+        }
+        
+        input[type="text"], 
+        input[type="email"], 
+        input[type="password"],
+        select { 
+            width: 100%;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #2d1154;
+            box-shadow: 0 0 0 3px rgba(45, 17, 84, 0.1);
+        }
+        
+        .phone-input-group { 
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .phone-input-group select { 
+            width: 35%;
+            margin-bottom: 0;
+        }
+        
+        .phone-input-group input { 
+            width: 65%;
+            margin-bottom: 0;
+        }
+        
+        /* Alert Messages */
+        .alert {
+            padding: 14px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+        }
+        
+        .alert-success {
+            background-color: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+        
+        .alert-error {
+            background-color: #fef2f2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+        
+        .alert-info {
+            background-color: #eff6ff;
+            color: #1e40af;
+            border: 1px solid #bfdbfe;
+        }
+        
+        /* Timer Button */
+        .timer-btn {
+            background-color: #e2e8f0;
+            color: #718096;
+        }
+        
+        .timer-btn:disabled {
+            opacity: 1;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            header h1 { font-size: 2em; }
+            header p { font-size: 1em; }
+            .section-header h2 { font-size: 1.8em; }
+            .pricing-cards { grid-template-columns: 1fr; }
+            .card { padding: 30px 25px; }
+            .price { font-size: 2.8em; }
+            .modal-content { width: 95%; margin: 10% auto; }
+        }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>TriageAI - Instant Lead Management via WhatsApp</h1>
+    <div class="container">
+        <h1>Grow with fewer tools and lower fees</h1>
+        <p>Pay for one software subscription instead of five. No contracts. No per user fees.</p>
+    </div>
 </header>
 
 <div class="container pricing-section">
-    <h2>Choose Your Plan - <span id="plan-duration">Monthly</span></h2>
-    <div class="toggle-switch">
-        <label>
-            <input type="checkbox" id="annual-toggle" onchange="togglePricing()"> Annual (2 months free!)
-        </label>
+    <div class="section-header">
+        <h2>PRICING</h2>
+        
+        <div class="toggle-container">
+            <span class="toggle-label monthly-label active" onclick="toggleToMonthly()">Billed monthly</span>
+            <span class="toggle-label annual-label" onclick="toggleToAnnual()">Billed yearly <span class="savings-badge">Save up to 25%</span></span>
+        </div>
     </div>
 
     <div class="pricing-cards">
         
         <div class="card" data-plan="individual">
-            <h2>⭐ Individual Plan</h2>
-            <p class="real-price monthly-price">₹499/month</p>
-            <p class="real-price annual-price" style="display:none;">₹499/month</p>
-            <div class="price monthly-price">₹299<span style="font-size:0.5em;">/mo</span></div>
-            <div class="price annual-price" style="display:none;">₹249<span style="font-size:0.5em;">/mo</span></div>
-            <p>Perfect for solo entrepreneurs.</p>
+            <div class="card-header">
+                <div class="plan-title-row">
+                    <h2>⭐ Individual</h2>
+                    <span class="discount-badge monthly-price">Save ₹120/yr</span>
+                    <span class="discount-badge annual-price" style="display:none;">Save ₹249/yr</span>
+                </div>
+            </div>
+            
+            <div class="price-container">
+                <div class="price monthly-price">
+                    <span class="currency">₹</span>
+                    <span>299</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="price annual-price" style="display:none;">
+                    <span class="currency">₹</span>
+                    <span>249</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="transaction-fee">+ 2% transaction fee</div>
+            </div>
+            
             <ul class="features">
                 <li>1 Agent Slot (Admin)</li>
                 <li>Unlimited Leads & Follow-ups</li>
                 <li>Personalized Reports</li>
                 <li>Individual License Management</li>
-                <li>*Cannot add agents</li>
+                <li class="disabled">Cannot add agents</li>
             </ul>
-            <button class="start-btn" onclick="openSignup('individual')">Start Individual Plan</button>
+            
+            <button class="start-btn" onclick="openSignup('individual')">Get started</button>
         </div>
 
-        <div class="card" data-plan="5user">
-            <h2>👥 5-User Team</h2>
-            <p class="real-price monthly-price">₹2495/month</p>
-            <p class="real-price annual-price" style="display:none;">₹2495/month</p>
-            <div class="price monthly-price">₹1495<span style="font-size:0.5em;">/mo</span></div>
-            <div class="price annual-price" style="display:none;">₹1245<span style="font-size:0.5em;">/mo</span></div>
-            <p>The core solution for small teams.</p>
+        <div class="card popular" data-plan="5user">
+            <div class="popular-badge">Start here and scale up 🚀</div>
+            <div class="card-header">
+                <div class="plan-title-row">
+                    <h2>👥 5-User Team</h2>
+                    <span class="discount-badge monthly-price">Save ₹240/yr</span>
+                    <span class="discount-badge annual-price" style="display:none;">Save ₹360/yr</span>
+                </div>
+            </div>
+            
+            <div class="price-container">
+                <div class="price monthly-price">
+                    <span class="currency">₹</span>
+                    <span>1495</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="price annual-price" style="display:none;">
+                    <span class="currency">₹</span>
+                    <span>1245</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="transaction-fee">+ 1% transaction fee</div>
+            </div>
+            
             <ul class="features">
-                <li>Up to 5 Agent Slots (1 Admin + 4 Agents)</li>
-                <li>Full Admin Lead Visibility</li>
-                <li>Agent Role-Based Access Control</li>
-                <li>Team Reports & Pipeline</li>
+                <li>Up to 5 Agent Slots</li>
+                <li>Unlimited team members</li>
+                <li>Membership Payments</li>
+                <li>Authentication</li>
+                <li>CRM</li>
+                <li>Email marketing</li>
+                <li>Help desk</li>
+                <li>Reporting</li>
             </ul>
-            <button class="start-btn" onclick="openSignup('5user')">Start 5-User Plan</button>
+            
+            <button class="start-btn" onclick="openSignup('5user')">Get started</button>
         </div>
 
         <div class="card" data-plan="10user">
-            <h2>🚀 10-User Pro</h2>
-            <p class="real-price monthly-price">₹4990/month</p>
-            <p class="real-price annual-price" style="display:none;">₹4990/month</p>
-            <div class="price monthly-price">₹2990<span style="font-size:0.5em;">/mo</span></div>
-            <div class="price annual-price" style="display:none;">₹2490<span style="font-size:0.5em;">/mo</span></div>
-            <p>Scale your sales with advanced features.</p>
+            <div class="card-header">
+                <div class="plan-title-row">
+                    <h2>🚀 10-User Pro</h2>
+                    <span class="discount-badge monthly-price">Save ₹1,200/yr</span>
+                    <span class="discount-badge annual-price" style="display:none;">Save ₹1,360/yr</span>
+                </div>
+            </div>
+            
+            <div class="price-container">
+                <div class="price monthly-price">
+                    <span class="currency">₹</span>
+                    <span>2990</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="price annual-price" style="display:none;">
+                    <span class="currency">₹</span>
+                    <span>2490</span>
+                    <span class="period">/ month</span>
+                </div>
+                <div class="transaction-fee">+ 1% transaction fee</div>
+            </div>
+            
             <ul class="features">
                 <li>Up to 10 Agent Slots</li>
-                <li>All 5-User Features</li>
-                <li>Priority Support</li>
-                <li>Custom Integrations (Future)</li>
+                <li>Unlimited team members</li>
+                <li>Membership Payments</li>
+                <li>Authentication</li>
+                <li>CRM</li>
+                <li>Email marketing</li>
+                <li>Help desk</li>
+                <li>Reporting</li>
             </ul>
-            <button class="start-btn" onclick="openSignup('10user')">Start 10-User Plan</button>
+            
+            <button class="start-btn" onclick="openSignup('10user')">Get started</button>
         </div>
 
     </div>
 </div>
 
+<!-- Signup Modal -->
 <div id="signupModal" class="modal">
     <div class="modal-content">
-        <span class="close" onclick="closeModal('signupModal')">&times;</span>
-        <h2>Sign Up - <span id="signupPlanName"></span></h2>
-        <form id="signupForm">
-            <input type="hidden" id="selectedPlan" name="plan">
-            <input type="hidden" id="selectedDuration" name="duration" value="monthly">
-            <label for="fullName">Full Name</label>
-            <input type="text" id="fullName" name="name" required>
-            
-            <label for="waNumber">WhatsApp Number</label>
-            <div class="phone-input-group">
-                <select id="countryCode" required>
-                    <option value="91" selected>🇮🇳 +91 (India)</option>
-                    <option value="1">🇺🇸 +1 (USA/Can)</option>
-                    <option value="44">🇬🇧 +44 (UK)</option>
-                    <option value="61">🇦🇺 +61 (Aus)</option>
-                    <option value="60">🇲🇾 +60 (Malaysia)</option>
-                    <option value="65">🇸🇬 +65 (Singapore)</option>
-                </select>
-                <input type="text" id="localNumber" name="local_phone" placeholder="e.g., 9876543210" required title="Enter the local phone number digits.">
-            </div>
-            <input type="hidden" id="waNumber" name="phone">
+        <div class="modal-header">
+            <span class="close" onclick="closeModal('signupModal')">&times;</span>
+            <h2>Create Your Account</h2>
+            <p style="color: #718096; margin-top: 8px; font-size: 0.95em;">
+                <span id="signupPlanName"></span>
+            </p>
+        </div>
+        <div class="modal-body">
+            <form id="signupForm">
+                <input type="hidden" id="selectedPlan" name="plan">
+                <input type="hidden" id="selectedDuration" name="duration" value="monthly">
+                
+                <label for="fullName">Full Name</label>
+                <input type="text" id="fullName" name="name" placeholder="John Doe" required>
+                
+                <label for="waNumber">WhatsApp Number</label>
+                <div class="phone-input-group">
+                    <select id="countryCode" required>
+                        <option value="91" selected>🇮🇳 +91</option>
+                        <option value="1">🇺🇸 +1</option>
+                        <option value="44">🇬🇧 +44</option>
+                        <option value="61">🇦🇺 +61</option>
+                        <option value="60">🇲🇾 +60</option>
+                        <option value="65">🇸🇬 +65</option>
+                    </select>
+                    <input type="text" id="localNumber" name="local_phone" placeholder="9876543210" required>
+                </div>
+                <input type="hidden" id="waNumber" name="phone">
 
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" required>
-            
-            <label for="companyName">Company Name (Optional for Individual)</label>
-            <input type="text" id="companyName" name="company_name">
-            
-            <button type="submit" class="start-btn" id="signupBtn">Proceed to OTP Verification</button>
-        </form>
-    </div>
-</div>
-
-<div id="otpModal" class="modal">
-    <div class="modal-content">
-        <span class="close" onclick="closeModal('otpModal')">&times;</span>
-        <h2>Verify WhatsApp OTP</h2>
-        <p id="otpMsg">A verification code has been sent to <span id="otpPhoneDisplay"></span>. Check your WhatsApp.</p>
-        <form id="otpForm">
-            <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit OTP" required 
-                   title="Enter the 6-digit OTP sent to your WhatsApp">
-            <button type="submit" class="start-btn" id="verifyOtpBtn">Verify OTP</button>
-        </form>
-        <div style="text-align: center; margin-top: 15px;">
-            <button id="resendOtpBtn" class="start-btn" style="width: 50%; background-color: #888; display: none;" disabled>
-                Resend OTP (<span id="otpTimer">30</span>s)
-            </button>
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="john@example.com" required>
+                
+                <label for="companyName">Company Name <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
+                <input type="text" id="companyName" name="company_name" placeholder="Your Company">
+                
+                <button type="submit" class="start-btn" id="signupBtn">Continue to Verification</button>
+            </form>
         </div>
     </div>
 </div>
 
-<div id="billingModal" class="modal">
+<!-- OTP Modal -->
+<div id="otpModal" class="modal">
     <div class="modal-content">
-        <span class="close" onclick="closeModal('billingModal')">&times;</span>
-        <h2>Billing Information</h2>
-        <form id="billingForm">
-            <label for="bAddress">Billing Address</label>
-            <input type="text" id="bAddress" name="billing_address" required>
+        <div class="modal-header">
+            <span class="close" onclick="closeModal('otpModal')">&times;</span>
+            <h2>Verify WhatsApp</h2>
+        </div>
+        <div class="modal-body">
+            <div id="otpMsg" class="alert alert-info">
+                A verification code has been sent to <strong id="otpPhoneDisplay"></strong>. Check your WhatsApp.
+            </div>
             
-            <label for="bCityCountry">City/Country</label>
-            <input type="text" id="bCityCountry" name="city_country" required>
+            <form id="otpForm">
+                <label for="otpCode">Enter OTP</label>
+                <input type="text" id="otpCode" name="otp" placeholder="Enter 6-digit code" required maxlength="6">
+                <button type="submit" class="start-btn" id="verifyOtpBtn">Verify OTP</button>
+            </form>
             
-            <label for="gstNumber">GST/Tax Number (Optional)</label>
-            <input type="text" id="gstNumber" name="gst_number">
-            
-            <button type="submit" class="start-btn" id="billingBtn">Proceed to Payment</button>
-        </form>
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="resendOtpBtn" class="start-btn timer-btn" style="width: auto; padding: 10px 20px; display: none;" disabled>
+                    Resend OTP (<span id="otpTimer">30</span>s)
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
+<!-- Billing Modal -->
+<div id="billingModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="close" onclick="closeModal('billingModal')">&times;</span>
+            <h2>Billing Information</h2>
+        </div>
+        <div class="modal-body">
+            <form id="billingForm">
+                <label for="bAddress">Billing Address</label>
+                <input type="text" id="bAddress" name="billing_address" placeholder="123 Main Street" required>
+                
+                <label for="bCityCountry">City / Country</label>
+                <input type="text" id="bCityCountry" name="city_country" placeholder="Mumbai, India" required>
+                
+                <label for="gstNumber">GST/Tax Number <span style="color: #a0aec0; font-weight: 400;">(Optional)</span></label>
+                <input type="text" id="gstNumber" name="gst_number" placeholder="22AAAAA0000A1Z5">
+                
+                <button type="submit" class="start-btn" id="billingBtn">Continue to Payment</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Modal -->
 <div id="paymentModal" class="modal">
     <div class="modal-content">
-        <span class="close" onclick="closeModal('paymentModal')">&times;</span>
-        <h2>Payment Summary (Dummy)</h2>
-        <p>Plan: <span id="paymentPlan"></span></p>
-        <p>Agents: <span id="paymentAgents"></span></p>
-        <p>Total Price: <span id="paymentPrice"></span></p>
-        <p style="font-size: 0.9em; color: gray;">(Price is a simulation based on mock data)</p>
-        <button class="start-btn" onclick="simulatePaymentSuccess()" id="payNowBtn">Pay Now (MOCK SUCCESS)</button>
+        <div class="modal-header">
+            <span class="close" onclick="closeModal('paymentModal')">&times;</span>
+            <h2>Payment Summary</h2>
+        </div>
+        <div class="modal-body">
+            <div style="background: #f7fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #718096;">Plan:</span>
+                    <strong id="paymentPlan"></strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #718096;">Agent Slots:</span>
+                    <strong id="paymentAgents"></strong>
+                </div>
+                <div style="border-top: 2px solid #e2e8f0; margin: 15px 0; padding-top: 15px;"></div>
+                <div style="display: flex; justify-content: space-between; font-size: 1.3em;">
+                    <span style="color: #2d3748; font-weight: 600;">Total:</span>
+                    <strong id="paymentPrice" style="color: #075E54;"></strong>
+                </div>
+            </div>
+            
+            <p style="font-size: 0.9em; color: #a0aec0; text-align: center; margin-bottom: 20px;">
+                (Simulation mode - No actual payment will be processed)
+            </p>
+            
+            <button class="start-btn" onclick="simulatePaymentSuccess()" id="payNowBtn">Complete Payment (Demo)</button>
+        </div>
     </div>
 </div>
 
 <script>
-    // Frontend mock details mapped to backend structure
     let globalRegistrationData = {
         "individual": {
             "agents": 1, 
             "price_monthly": 299, 
-            "price_annual": 249 * 12, // The correct annual total price
-            "label": "Individual (1 Agent)", 
+            "price_annual": 249 * 12,
+            "label": "Individual Plan", 
             "key_monthly": "individual",
-            "key_annual": "individual_annual" // <--- FIX: Corrected annual key
+            "key_annual": "individual_annual"
         },
         "5user": {
             "agents": 5, 
             "price_monthly": 1495, 
             "price_annual": 1245 * 12, 
-            "label": "5-User Team", 
+            "label": "5-User Team Plan", 
             "key_monthly": "5user_monthly", 
             "key_annual": "5user_annual"
         },
@@ -208,54 +772,59 @@
             "agents": 10, 
             "price_monthly": 2990, 
             "price_annual": 2490 * 12, 
-            "label": "10-User Pro", 
+            "label": "10-User Pro Plan", 
             "key_monthly": "10user_monthly", 
             "key_annual": "10user_annual"
         },
     };
 
     let checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
-
     let resendTimer = 30;
     let timerInterval;
 
+    function toggleToMonthly() {
+        document.querySelector('.monthly-label').classList.add('active');
+        document.querySelector('.annual-label').classList.remove('active');
+        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'block');
+        document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'none');
+        checkoutState.duration = 'monthly';
+    }
+
+    function toggleToAnnual() {
+        document.querySelector('.monthly-label').classList.remove('active');
+        document.querySelector('.annual-label').classList.add('active');
+        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'block');
+        checkoutState.duration = 'annual';
+    }
+
     function togglePricing() {
-        const isAnnual = document.getElementById('annual-toggle').checked;
-        const duration = isAnnual ? 'annual' : 'monthly';
-        document.getElementById('plan-duration').textContent = isAnnual ? 'Annual' : 'Monthly';
-        document.querySelectorAll('.monthly-price').forEach(el => el.style.display = isAnnual ? 'none' : 'block');
-        document.querySelectorAll('.annual-price').forEach(el => el.style.display = isAnnual ? 'block' : 'none');
-        
-        // Update checkout state duration
-        checkoutState.duration = duration;
+        if (checkoutState.duration === 'monthly') {
+            toggleToAnnual();
+        } else {
+            toggleToMonthly();
+        }
     }
 
     function openSignup(planKey) {
         const plan = globalRegistrationData[planKey];
         checkoutState.plan = planKey;
         
-        const isAnnual = document.getElementById('annual-toggle').checked;
+        const isAnnual = checkoutState.duration === 'annual';
         const durationKey = isAnnual ? 'annual' : 'monthly';
         
-        // Calculate price per month * duration (12 for annual, 1 for monthly)
-        // Note: The displayed monthly price is already computed in the HTML
-        let pricePerMonth;
         let totalPrice;
-        
         if (isAnnual) {
-            pricePerMonth = plan['price_annual'] / 12; // Calculate the effective monthly price for display
-            totalPrice = plan['price_annual']; // Send the total annual price
-            checkoutState.backend_key = plan['key_annual']; // Use the correct annual key
+            totalPrice = plan['price_annual'];
+            checkoutState.backend_key = plan['key_annual'];
         } else {
-            pricePerMonth = plan['price_monthly'];
             totalPrice = plan['price_monthly'];
-            checkoutState.backend_key = plan['key_monthly']; // Use the correct monthly key
+            checkoutState.backend_key = plan['key_monthly'];
         }
         
         checkoutState.price = totalPrice;
-        // checkoutState.backend_key is set inside the conditional block above
 
-        document.getElementById('signupPlanName').textContent = plan.label + ' (' + (isAnnual ? 'Annual' : 'Monthly') + ')';
+        document.getElementById('signupPlanName').textContent = plan.label + ' - ' + (isAnnual ? 'Annual Billing' : 'Monthly Billing');
         document.getElementById('selectedPlan').value = planKey;
         document.getElementById('selectedDuration').value = durationKey;
         
@@ -265,58 +834,54 @@
     function closeModal(id) {
         document.getElementById(id).style.display = 'none';
         if (id === 'otpModal' && timerInterval) {
-            clearInterval(timerInterval); // Stop timer when modal closes
+            clearInterval(timerInterval);
         }
     }
     
-    // NEW: Function to combine country code and local number
     function getCombinedPhoneNumber() {
         const countryCode = document.getElementById('countryCode').value;
-        const localNumber = document.getElementById('localNumber').value.replace(/\D/g, ''); // Remove non-digits
+        const localNumber = document.getElementById('localNumber').value.replace(/\D/g, '');
         
-        if (localNumber.length < 8) { // Basic validation check (8 digits minimum for local part)
+        if (localNumber.length < 8) {
             alert("Please enter a valid local phone number (at least 8 digits).");
             return null;
         }
         
         const fullNumber = countryCode + localNumber;
-        document.getElementById('waNumber').value = fullNumber; // Set hidden field
+        document.getElementById('waNumber').value = fullNumber;
         return fullNumber;
     }
     
-    // NEW: OTP Timer Functions
     function startOtpTimer() {
         if(timerInterval) clearInterval(timerInterval);
-        resendTimer = 30; // Reset timer
-        document.getElementById('resendOtpBtn').style.display = 'block';
-        document.getElementById('resendOtpBtn').disabled = true;
-        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
+        resendTimer = 30;
+        const resendBtn = document.getElementById('resendOtpBtn');
+        resendBtn.style.display = 'inline-block';
+        resendBtn.disabled = true;
+        resendBtn.classList.add('timer-btn');
         document.getElementById('otpTimer').textContent = resendTimer;
-
 
         timerInterval = setInterval(() => {
             resendTimer--;
             document.getElementById('otpTimer').textContent = resendTimer;
             if (resendTimer <= 0) {
                 clearInterval(timerInterval);
-                document.getElementById('resendOtpBtn').disabled = false;
-                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54'; // Active color
-                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
-                document.getElementById('resendOtpBtn').onclick = resendOtp;
+                resendBtn.disabled = false;
+                resendBtn.classList.remove('timer-btn');
+                resendBtn.textContent = 'Resend OTP';
+                resendBtn.onclick = resendOtp;
             }
         }, 1000);
     }
     
     async function resendOtp() {
-        document.getElementById('resendOtpBtn').disabled = true;
-        document.getElementById('resendOtpBtn').style.backgroundColor = '#888';
-        document.getElementById('resendOtpBtn').textContent = 'Sending...';
+        const resendBtn = document.getElementById('resendOtpBtn');
+        resendBtn.disabled = true;
+        resendBtn.textContent = 'Sending...';
 
         try {
-            // Simulate resending the registration request to generate a new OTP
             const formData = new FormData(document.getElementById('signupForm'));
             formData.set('phone', checkoutState.phone); 
-            
             const data = Object.fromEntries(formData.entries());
 
             const response = await fetch('/api/register', {
@@ -327,28 +892,26 @@
             const result = await response.json();
             
             if (result.status === 'success') {
+                document.getElementById('otpMsg').className = 'alert alert-success';
                 document.getElementById('otpMsg').innerHTML = `✅ New OTP sent to <strong>${checkoutState.phone}</strong>.`;
                 startOtpTimer();
             } else {
-                alert('Resend Failed: ' + result.message);
+                document.getElementById('otpMsg').className = 'alert alert-error';
+                document.getElementById('otpMsg').innerHTML = '❌ Resend Failed: ' + result.message;
             }
         } catch (error) {
-            alert('An unexpected error occurred during OTP resend.');
-        } finally {
-            if (resendTimer <= 0) { // Only re-enable if timer finished before submission
-                document.getElementById('resendOtpBtn').disabled = false;
-                document.getElementById('resendOtpBtn').style.backgroundColor = '#075E54';
-                document.getElementById('resendOtpBtn').textContent = 'Resend OTP';
-            }
+            document.getElementById('otpMsg').className = 'alert alert-error';
+            document.getElementById('otpMsg').innerHTML = '❌ An unexpected error occurred during OTP resend.';
         }
     }
     
     function openOtpModal(phone) {
         document.getElementById('otpPhoneDisplay').textContent = phone;
+        document.getElementById('otpMsg').className = 'alert alert-info';
         document.getElementById('otpMsg').innerHTML = `A verification code has been sent to <strong>${phone}</strong>. Check your WhatsApp.`;
-        document.getElementById('otpCode').value = ''; // Clear previous OTP
+        document.getElementById('otpCode').value = '';
         document.getElementById('otpModal').style.display = 'block';
-        startOtpTimer(); // Start the timer when the modal opens
+        startOtpTimer();
     }
 
     document.getElementById('signupForm').addEventListener('submit', async function(event) {
@@ -356,19 +919,19 @@
         
         const fullPhone = getCombinedPhoneNumber();
         if (!fullPhone) {
-            document.getElementById('signupBtn').disabled = false;
             return;
         }
         
-        document.getElementById('signupBtn').disabled = true;
+        const signupBtn = document.getElementById('signupBtn');
+        signupBtn.disabled = true;
+        signupBtn.textContent = 'Processing...';
         
-        // Ensure the data sent includes the combined phone number
         const formData = new FormData(this);
-        formData.delete('local_phone'); // Remove the split field
-        formData.set('phone', fullPhone); // Add the combined field
+        formData.delete('local_phone');
+        formData.set('phone', fullPhone);
         
         const data = Object.fromEntries(formData.entries());
-        checkoutState.phone = data.phone; // Update checkout state
+        checkoutState.phone = data.phone;
 
         try {
             const response = await fetch('/api/register', {
@@ -380,7 +943,7 @@
             
             if (result.status === 'success') {
                 closeModal('signupModal');
-                openOtpModal(data.phone); // Use the new function
+                openOtpModal(data.phone);
             } else {
                 alert('Registration Failed: ' + result.message);
             }
@@ -388,13 +951,17 @@
             console.error('Error:', error);
             alert('An unexpected error occurred during registration.');
         } finally {
-            document.getElementById('signupBtn').disabled = false;
+            signupBtn.disabled = false;
+            signupBtn.textContent = 'Continue to Verification';
         }
     });
 
     document.getElementById('otpForm').addEventListener('submit', async function(event) {
         event.preventDefault();
-        document.getElementById('verifyOtpBtn').disabled = true;
+        const verifyBtn = document.getElementById('verifyOtpBtn');
+        verifyBtn.disabled = true;
+        verifyBtn.textContent = 'Verifying...';
+        
         const otp = document.getElementById('otpCode').value;
         
         try {
@@ -406,29 +973,35 @@
             const result = await response.json();
             
             if (result.status === 'success') {
-                clearInterval(timerInterval); // Stop timer
-                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to Billing in 1 second.`;
-                document.getElementById('verifyOtpBtn').style.backgroundColor = '#1DA851';
+                clearInterval(timerInterval);
+                document.getElementById('otpMsg').className = 'alert alert-success';
+                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to billing...`;
                 
                 setTimeout(() => {
                     closeModal('otpModal');
                     document.getElementById('billingModal').style.display = 'block';
-                }, 1000); // 1 second delay
+                }, 1000);
                 
             } else {
+                document.getElementById('otpMsg').className = 'alert alert-error';
                 document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
             }
         } catch (error) {
             console.error('Error:', error);
+            document.getElementById('otpMsg').className = 'alert alert-error';
             document.getElementById('otpMsg').innerHTML = `❌ An unexpected error occurred.`;
         } finally {
-            document.getElementById('verifyOtpBtn').disabled = false;
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = 'Verify OTP';
         }
     });
 
     document.getElementById('billingForm').addEventListener('submit', async function(event) {
         event.preventDefault();
-        document.getElementById('billingBtn').disabled = true;
+        const billingBtn = document.getElementById('billingBtn');
+        billingBtn.disabled = true;
+        billingBtn.textContent = 'Processing...';
+        
         const formData = new FormData(this);
         const data = Object.fromEntries(formData.entries());
         data.phone = checkoutState.phone;
@@ -444,13 +1017,12 @@
             if (result.status === 'success') {
                 closeModal('billingModal');
                 
-                // Prepare payment modal data
                 const planDetails = globalRegistrationData[checkoutState.plan];
                 const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
                 
                 document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
                 document.getElementById('paymentAgents').textContent = planDetails.agents;
-                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price + (checkoutState.duration === 'annual' ? ' (Annual Total)' : ' (Monthly)');
+                document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + (checkoutState.duration === 'annual' ? ' (Annual)' : '');
 
                 document.getElementById('paymentModal').style.display = 'block';
             } else {
@@ -460,13 +1032,15 @@
             console.error('Error:', error);
             alert('An unexpected error occurred during billing submission.');
         } finally {
-            document.getElementById('billingBtn').disabled = false;
+            billingBtn.disabled = false;
+            billingBtn.textContent = 'Continue to Payment';
         }
     });
 
     async function simulatePaymentSuccess() {
-        document.getElementById('payNowBtn').disabled = true;
-        alert("Simulating successful payment...");
+        const payBtn = document.getElementById('payNowBtn');
+        payBtn.disabled = true;
+        payBtn.textContent = 'Processing Payment...';
 
         try {
             const response = await fetch('/api/purchase', {
@@ -480,7 +1054,7 @@
             if (result.status === 'success') {
                 alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
                 closeModal('paymentModal');
-                window.location.href = '{{ website_url }}'; // Go back to the main page or success page
+                window.location.href = '{{ website_url }}';
             } else {
                 alert('❌ License Activation Failed: ' + result.message);
             }
@@ -488,7 +1062,18 @@
             console.error('Error:', error);
             alert('An unexpected error occurred after payment.');
         } finally {
-            document.getElementById('payNowBtn').disabled = false;
+            payBtn.disabled = false;
+            payBtn.textContent = 'Complete Payment (Demo)';
+        }
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        if (event.target.classList.contains('modal')) {
+            event.target.style.display = 'none';
+            if (event.target.id === 'otpModal' && timerInterval) {
+                clearInterval(timerInterval);
+            }
         }
     }
 </script>
