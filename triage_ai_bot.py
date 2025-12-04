@@ -101,7 +101,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 # --- DUMMY PAYMENT CONFIG ---
 PLANS = {
-    # Individual Plan: 1 agent (Use base label and construct duration dynamically)
+    # Individual Plan: 1 agent (Monthly is the base key)
     "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent)"},
     "individual_annual": {"agents": 1, "price": 249 * 12, "duration": timedelta(days=365), "label": "Individual (1 Agent)"},
     
@@ -1286,9 +1286,10 @@ def api_renewal_purchase():
         
         # === FIX: Build the proper plan_label with duration ===
         base_label = plan_details['label']
-        if 'annual' in plan_key:
+        # Determine duration suffix based on plan_key
+        if plan_key == 'individual_annual' or 'annual' in plan_key:
             duration_suffix = "Annual (Discounted)"
-        elif 'monthly' in plan_key or plan_key == 'individual':
+        elif plan_key == 'individual' or 'monthly' in plan_key:
             duration_suffix = "Monthly"
         else:
             duration_suffix = ""
@@ -1461,9 +1462,10 @@ def api_purchase():
         expiry_date = datetime.utcnow() + plan_details['duration'] 
         
         base_label = plan_details['label']
-        if 'annual' in plan_key:
+        # Determine duration suffix based on plan_key
+        if plan_key == 'individual_annual' or 'annual' in plan_key:
             duration_suffix = "Annual (Discounted)"
-        elif 'monthly' in plan_key or plan_key == 'individual':
+        elif plan_key == 'individual' or 'monthly' in plan_key:
             duration_suffix = "Monthly"
         else:
             duration_suffix = ""

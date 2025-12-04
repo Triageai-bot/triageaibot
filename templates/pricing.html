@@ -188,9 +188,30 @@
 <script>
     // Frontend mock details mapped to backend structure
     let globalRegistrationData = {
-        "individual": {"agents": 1, "price_monthly": 299, "price_annual": 249, "label": "Individual (1 Agent)", "key_monthly": "individual", "key_annual": "individual"},
-        "5user": {"agents": 5, "price_monthly": 1495, "price_annual": 1245, "label": "5-User Team", "key_monthly": "5user_monthly", "key_annual": "5user_annual"},
-        "10user": {"agents": 10, "price_monthly": 2990, "price_annual": 2490, "label": "10-User Pro", "key_monthly": "10user_monthly", "key_annual": "10user_annual"},
+        "individual": {
+            "agents": 1, 
+            "price_monthly": 299, 
+            "price_annual": 249 * 12, // The correct annual total price
+            "label": "Individual (1 Agent)", 
+            "key_monthly": "individual",
+            "key_annual": "individual_annual" // <--- FIX: Corrected annual key
+        },
+        "5user": {
+            "agents": 5, 
+            "price_monthly": 1495, 
+            "price_annual": 1245 * 12, 
+            "label": "5-User Team", 
+            "key_monthly": "5user_monthly", 
+            "key_annual": "5user_annual"
+        },
+        "10user": {
+            "agents": 10, 
+            "price_monthly": 2990, 
+            "price_annual": 2490 * 12, 
+            "label": "10-User Pro", 
+            "key_monthly": "10user_monthly", 
+            "key_annual": "10user_annual"
+        },
     };
 
     let checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
@@ -216,11 +237,23 @@
         const isAnnual = document.getElementById('annual-toggle').checked;
         const durationKey = isAnnual ? 'annual' : 'monthly';
         
-        const pricePerMonth = plan['price_' + durationKey];
-        const totalPrice = pricePerMonth * (isAnnual ? 12 : 1);
+        // Calculate price per month * duration (12 for annual, 1 for monthly)
+        // Note: The displayed monthly price is already computed in the HTML
+        let pricePerMonth;
+        let totalPrice;
+        
+        if (isAnnual) {
+            pricePerMonth = plan['price_annual'] / 12; // Calculate the effective monthly price for display
+            totalPrice = plan['price_annual']; // Send the total annual price
+            checkoutState.backend_key = plan['key_annual']; // Use the correct annual key
+        } else {
+            pricePerMonth = plan['price_monthly'];
+            totalPrice = plan['price_monthly'];
+            checkoutState.backend_key = plan['key_monthly']; // Use the correct monthly key
+        }
         
         checkoutState.price = totalPrice;
-        checkoutState.backend_key = plan['key_' + durationKey];
+        // checkoutState.backend_key is set inside the conditional block above
 
         document.getElementById('signupPlanName').textContent = plan.label + ' (' + (isAnnual ? 'Annual' : 'Monthly') + ')';
         document.getElementById('selectedPlan').value = planKey;
