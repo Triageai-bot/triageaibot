@@ -1407,8 +1407,8 @@
     </div>
 
     <script>
-        // Get auth token from Flask template
-        const WEB_AUTH_TOKEN = "demo_token_12345";
+        // Get auth token from Flask template - THIS SHOULD BE RENDERED BY YOUR BACKEND
+        const WEB_AUTH_TOKEN = "{{ web_auth_token }}";
         
         let globalRegistrationData = {
             "individual": {
@@ -1570,12 +1570,19 @@
             checkoutState.phone = data.phone;
 
             try {
-                // Simulate API call
-                console.log('Registration data:', data);
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
                 
-                closeModal('signupModal');
-                openOtpModal(data.phone);
+                if (result.status === 'success') {
+                    closeModal('signupModal');
+                    openOtpModal(data.phone);
+                } else {
+                    alert('Registration Failed: ' + result.message);
+                }
             } catch (error) {
                 console.error('Error:', error);
                 alert('An unexpected error occurred during registration.');
@@ -1594,19 +1601,27 @@
             const otp = document.getElementById('otpCode').value;
             
             try {
-                // Simulate API call
-                console.log('Verifying OTP:', otp, 'for phone:', checkoutState.phone);
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                const response = await fetch('/api/verify_otp', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({"phone": checkoutState.phone, "otp": otp})
+                });
+                const result = await response.json();
                 
-                clearInterval(timerInterval);
-                document.getElementById('otpMsg').className = 'alert alert-success';
-                document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to billing...`;
-                
-                setTimeout(() => {
-                    closeModal('otpModal');
-                    document.getElementById('billingModal').style.display = 'block';
-                }, 1000);
-                
+                if (result.status === 'success') {
+                    clearInterval(timerInterval);
+                    document.getElementById('otpMsg').className = 'alert alert-success';
+                    document.getElementById('otpMsg').innerHTML = `✅ <strong>OTP Verified!</strong> Proceeding to billing...`;
+                    
+                    setTimeout(() => {
+                        closeModal('otpModal');
+                        document.getElementById('billingModal').style.display = 'block';
+                    }, 1000);
+                    
+                } else {
+                    document.getElementById('otpMsg').className = 'alert alert-error';
+                    document.getElementById('otpMsg').innerHTML = `❌ ${result.message}`;
+                }
             } catch (error) {
                 console.error('Error:', error);
                 document.getElementById('otpMsg').className = 'alert alert-error';
@@ -1628,26 +1643,33 @@
             data.phone = checkoutState.phone;
 
             try {
-                // Simulate API call
-                console.log('Billing data:', data);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                closeModal('billingModal');
-                
-                const planDetails = globalRegistrationData[checkoutState.plan];
-                const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
-                
-                document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
-                document.getElementById('paymentAgents').textContent = planDetails.agents;
-                
-                // Display price correctly based on duration
-                if (checkoutState.duration === 'annual') {
-                    document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + ' (Yearly)';
-                } else {
-                    document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + '/month';
-                }
+                const response = await fetch('/api/billing', {
+                    method: 'POST',
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
 
-                document.getElementById('paymentModal').style.display = 'block';
+                if (result.status === 'success') {
+                    closeModal('billingModal');
+                    
+                    const planDetails = globalRegistrationData[checkoutState.plan];
+                    const durationDisplay = checkoutState.duration.charAt(0).toUpperCase() + checkoutState.duration.slice(1);
+                    
+                    document.getElementById('paymentPlan').textContent = planDetails.label + ' (' + durationDisplay + ')';
+                    document.getElementById('paymentAgents').textContent = planDetails.agents;
+                    
+                    // Display price correctly based on duration
+                    if (checkoutState.duration === 'annual') {
+                        document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + ' (Yearly)';
+                    } else {
+                        document.getElementById('paymentPrice').textContent = '₹' + checkoutState.price.toLocaleString() + '/month';
+                    }
+
+                    document.getElementById('paymentModal').style.display = 'block';
+                } else {
+                    alert('Billing Info Failed: ' + result.message);
+                }
             } catch (error) {
                 console.error('Error:', error);
                 alert('An unexpected error occurred during billing submission.');
@@ -1663,15 +1685,24 @@
             payBtn.textContent = 'Processing Payment...';
 
             try {
-                // Simulate API call
-                console.log('Processing payment for plan:', checkoutState.backend_key, 'phone:', checkoutState.phone);
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                const response = await fetch('/api/purchase', {
+                    method: 'POST',
+                    headers: {
+                        "Content-Type": "application/json", 
+                        "Authorization": `Bearer ${WEB_AUTH_TOKEN}`
+                    },
+                    body: JSON.stringify({"plan": checkoutState.backend_key, "phone": checkoutState.phone})
+                });
                 
-                alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
-                closeModal('paymentModal');
+                const result = await response.json();
                 
-                // Reset checkout state
-                checkoutState = {"plan": "", "duration": "monthly", "price": 0, "phone": "", "backend_key": ""};
+                if (result.status === 'success') {
+                    alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
+                    closeModal('paymentModal');
+                    window.location.href = '/';
+                } else {
+                    alert('❌ License Activation Failed: ' + result.message);
+                }
             } catch (error) {
                 console.error('Error:', error);
                 alert('An unexpected error occurred after payment.');
