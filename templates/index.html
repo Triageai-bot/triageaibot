@@ -28,12 +28,10 @@
             overflow-x: hidden;
         }
 
-        /* Smooth Scroll */
         html {
             scroll-behavior: smooth;
         }
 
-        /* Navigation */
         .navbar {
             position: fixed;
             top: 0;
@@ -124,7 +122,6 @@
             transition: 0.3s;
         }
 
-        /* Hero Section */
         .hero {
             margin-top: 80px;
             padding: 100px 2rem;
@@ -206,7 +203,6 @@
             color: var(--primary-color);
         }
 
-        /* Product Section */
         .product-section {
             padding: 100px 2rem;
             max-width: 1400px;
@@ -241,7 +237,6 @@
             margin: 0 auto;
         }
 
-        /* Features Grid */
         .features-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -280,7 +275,6 @@
             line-height: 1.8;
         }
 
-        /* About Section */
         .about-section {
             padding: 100px 2rem;
             background: var(--bg-light);
@@ -331,7 +325,6 @@
             letter-spacing: 1px;
         }
 
-        /* Partners Section */
         .partners-section {
             padding: 80px 2rem;
             background: white;
@@ -363,7 +356,6 @@
             100% { transform: translateX(-50%); }
         }
 
-        /* Testimonials */
         .testimonials-section {
             padding: 100px 2rem;
             background: var(--bg-light);
@@ -432,7 +424,6 @@
             font-size: 0.9em;
         }
 
-        /* Pricing Section */
         .pricing-section {
             padding: 100px 2rem;
             background: var(--bg-light);
@@ -632,7 +623,6 @@
             background: #e91e63;
         }
 
-        /* Modal Styles */
         .modal { 
             display: none;
             position: fixed;
@@ -706,7 +696,6 @@
             color: #2d3748;
         }
         
-        /* Form Styles */
         .modal-body label {
             display: block;
             color: #4a5568;
@@ -752,7 +741,6 @@
             margin-bottom: 0;
         }
         
-        /* Alert Messages */
         .alert {
             padding: 14px 16px;
             border-radius: 8px;
@@ -778,7 +766,6 @@
             border: 1px solid #bfdbfe;
         }
         
-        /* Timer Button */
         .timer-btn {
             background-color: #e2e8f0 !important;
             color: #718096 !important;
@@ -788,7 +775,6 @@
             opacity: 1;
         }
 
-        /* Footer */
         .footer {
             background: var(--text-dark);
             color: white;
@@ -845,7 +831,6 @@
             opacity: 0.7;
         }
 
-        /* Responsive */
         @media (max-width: 768px) {
             .mobile-toggle {
                 display: flex;
@@ -891,7 +876,6 @@
 </head>
 <body>
 
-    <!-- Navigation -->
     <nav class="navbar" id="navbar">
         <div class="nav-container">
             <div class="logo">TriageAI</div>
@@ -911,7 +895,6 @@
         </div>
     </nav>
 
-    <!-- Hero Section -->
     <section class="hero" id="home">
         <div class="hero-content">
             <h1>Transform Your Lead Management with AI-Powered WhatsApp Automation</h1>
@@ -923,7 +906,6 @@
         </div>
     </section>
 
-    <!-- Product Section -->
     <section class="product-section" id="product">
         <div class="section-header">
             <div class="section-tag">PRODUCT</div>
@@ -952,8 +934,8 @@
 
             <div class="feature-card">
                 <div class="feature-icon">📊</div>
-                <h3>Real-Time Reports</h3>
-                <p>Generate comprehensive reports in text, Excel, or PDF formats with custom date ranges. Get daily summaries automatically delivered at 8 PM IST with key metrics.</p>
+                <h3>Real-Time Reports & Analytics</h3>
+                <p>Generate comprehensive reports in text, Excel, or PDF formats with custom date ranges. Get daily summaries at 8 PM IST and visualize your pipeline with real-time status counts.</p>
             </div>
 
             <div class="feature-card">
@@ -970,25 +952,18 @@
 
             <div class="feature-card">
                 <div class="feature-icon">🔍</div>
-                <h3>Advanced Search & Filter</h3>
-                <p>Find any lead instantly by name, phone, status, or keyword. Search across your personal leads or your entire company database (admin only).</p>
+                <h3>Advanced Search & Duplicate Detection</h3>
+                <p>Find any lead instantly by name, phone, status, or keyword. Automatically identifies duplicate leads by phone number across your organization, preventing redundant outreach.</p>
             </div>
 
             <div class="feature-card">
-                <div class="feature-icon">📈</div>
-                <h3>Pipeline Visualization</h3>
-                <p>Track lead progression through stages: New → Hot → Follow-Up → Converted. See your sales pipeline status at a glance with real-time counts.</p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">🔄</div>
-                <h3>Duplicate Detection</h3>
-                <p>Automatically identifies duplicate leads by phone number across your organization, preventing redundant outreach and maintaining data quality.</p>
+                <div class="feature-icon">🎯</div>
+                <h3>Zero Learning Curve</h3>
+                <p>No training required—just chat naturally in WhatsApp. AI understands context, processes commands instantly, and guides you through every step with smart prompts.</p>
             </div>
         </div>
     </section>
 
-    <!-- About Section -->
     <section class="about-section" id="about">
         <div class="about-content">
             <div class="about-text">
@@ -1027,7 +1002,6 @@
         </div>
     </section>
 
-    <!-- Partners Section -->
     <section class="partners-section">
         <div class="section-header">
             <div class="section-tag">TRUSTED BY</div>
@@ -1040,7 +1014,6 @@
             <div class="partner-logo">Swift Enterprises</div>
             <div class="partner-logo">Quantum Systems</div>
             <div class="partner-logo">Nexus Group</div>
-            <!-- Duplicate for seamless loop -->
             <div class="partner-logo">TechCorp Solutions</div>
             <div class="partner-logo">Global Ventures</div>
             <div class="partner-logo">Innovate Digital</div>
@@ -1050,7 +1023,6 @@
         </div>
     </section>
 
-    <!-- Testimonials Section -->
     <section class="testimonials-section" id="testimonials">
         <div class="section-header">
             <div class="section-tag">TESTIMONIALS</div>
@@ -1133,7 +1105,6 @@
         </div>
     </section>
 
-    <!-- Pricing Section -->
     <section class="pricing-section" id="pricing">
         <div class="pricing-intro">
             <div class="section-tag">PRICING</div>
@@ -1240,7 +1211,6 @@
         </div>
     </section>
 
-    <!-- Contact Section -->
     <section class="product-section" id="contact">
         <div class="section-header">
             <div class="section-tag">CONTACT US</div>
@@ -1269,7 +1239,6 @@
         </div>
     </section>
 
-    <!-- Footer -->
     <footer class="footer">
         <div class="footer-content">
             <div class="footer-brand">
@@ -1313,7 +1282,6 @@
         </div>
     </footer>
 
-    <!-- Signup Modal -->
     <div id="signupModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1357,7 +1325,6 @@
         </div>
     </div>
 
-    <!-- OTP Modal -->
     <div id="otpModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1384,7 +1351,6 @@
         </div>
     </div>
 
-    <!-- Billing Modal -->
     <div id="billingModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1408,7 +1374,6 @@
         </div>
     </div>
 
-    <!-- Payment Modal -->
     <div id="paymentModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1442,7 +1407,9 @@
     </div>
 
     <script>
-        // Purchase Flow JavaScript
+        // Get auth token from Flask template
+        const WEB_AUTH_TOKEN = "{{ web_auth_token }}";
+        
         let globalRegistrationData = {
             "individual": {
                 "agents": 1, 
@@ -1715,7 +1682,7 @@
                     method: 'POST',
                     headers: {
                         "Content-Type": "application/json", 
-                        "Authorization": "Bearer super_secret_web_key_123"
+                        "Authorization": `Bearer ${WEB_AUTH_TOKEN}`
                     },
                     body: JSON.stringify({"plan": checkoutState.backend_key, "phone": checkoutState.phone})
                 });
@@ -1738,7 +1705,6 @@
             }
         }
 
-        // Close modal when clicking outside
         window.onclick = function(event) {
             if (event.target.classList.contains('modal')) {
                 event.target.style.display = 'none';
@@ -1748,7 +1714,6 @@
             }
         }
 
-        // Navigation and other existing scripts below...
         const mobileToggle = document.getElementById('mobileToggle');
         const navMenu = document.getElementById('navMenu');
 
@@ -1756,7 +1721,6 @@
             navMenu.classList.toggle('active');
         });
 
-        // Navbar scroll effect
         window.addEventListener('scroll', () => {
             const navbar = document.getElementById('navbar');
             if (window.scrollY > 50) {
@@ -1766,7 +1730,6 @@
             }
         });
 
-        // Pricing Toggle
         function toggleToMonthly() {
             document.querySelector('.monthly-label').classList.add('active');
             document.querySelector('.annual-label').classList.remove('active');
@@ -1781,7 +1744,6 @@
             document.querySelectorAll('.annual-price').forEach(el => el.style.display = 'block');
         }
 
-        // Smooth scroll for anchor links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
                 e.preventDefault();
@@ -1791,7 +1753,6 @@
                         behavior: 'smooth',
                         block: 'start'
                     });
-                    // Close mobile menu if open
                     navMenu.classList.remove('active');
                 }
             });

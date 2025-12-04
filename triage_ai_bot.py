@@ -1146,9 +1146,9 @@ def format_pipeline_text(user_id: str) -> str:
 def pricing_page():
     """Renders the single-page pricing and signup HTML from a template."""
     WEBSITE_URL = "https://triageai.online/"
-    # Render the pricing.html template, passing required variables for JavaScript interpolation
+    # Render the index.html template, passing required variables for JavaScript interpolation
     return render_template(
-        'pricing.html', 
+        'index.html', 
         web_auth_token=WEB_AUTH_TOKEN, 
         website_url=WEBSITE_URL
     )
