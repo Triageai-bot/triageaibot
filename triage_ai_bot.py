@@ -1078,7 +1078,7 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('GRID', (0, 0), (-1, 0), 0.5, colors.grey),
     ]))
 
     story.append(data_table)
@@ -1294,7 +1294,7 @@ def api_renewal_purchase():
         # If renewing an expired license, start from now. If renewing an active one, extend from expiry.
         start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
         new_expiry_date = start_from + plan_details['duration']
-        plan_label = plan_details['label']
+        plan_label = plan_details['label'] # Use the full plan label
         
         license.expires_at = new_expiry_date
         license.is_active = True
