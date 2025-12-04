@@ -1255,7 +1255,7 @@ def api_renewal_purchase():
     data = request.json
     
     # === FIX: Define token and plan_key correctly from request.json ===
-    token = data.get('token')
+    token = data.get('token') # FIX: Define token locally
     plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual'
     phone = _sanitize_wa_id(data.get('phone', ''))
 
@@ -2955,6 +2955,7 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
 def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: datetime):
     """
     Sends the final renewal message to the admin after payment.
+    FIX: Ensure plan_name is used correctly.
     """
     local_session = Session()
     try:
@@ -2986,7 +2987,7 @@ def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: da
 def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str, expiry_date: datetime):
     """
     Sends the final welcome message to the admin after payment.
-    FIXED: Uses a NEW session to load the profile and avoid ResourceClosedError.
+    FIXED: Uses a NEW session to load the profile and avoids using company_name as plan_name.
     """
     local_session = Session()
     try:
