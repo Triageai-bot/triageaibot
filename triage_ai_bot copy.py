@@ -285,19 +285,6 @@ def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[Li
     }
 
     if buttons:
-        # Limit to 3 buttons as per WhatsApp documentation for reply buttons
-        buttons_payload = []
-        for btn in buttons[:3]: 
-            # Check if command or direct ID is used. CMD_ is for webhook parsing.
-            command_id = btn.get('command') or btn.get('id', 'N/A')
-            # Ensure the ID is correctly prefixed for internal parsing
-            final_id = command_id if command_id.startswith('CMD_') else f"CMD_{command_id}" 
-
-            buttons_payload.append({
-                "type": "reply", 
-                "reply": {"id": final_id, "title": btn['text']}
-            })
-
         payload = {
             "messaging_product": "whatsapp",
             "to": final_recipient,
@@ -306,7 +293,10 @@ def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[Li
                 "type": "button",
                 "body": {"text": text_message},
                 "action": {
-                    "buttons": buttons_payload
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": f"CMD_{btn['command']}", "title": btn['text']}}
+                        for btn in buttons
+                    ]
                 }
             }
         }
@@ -996,9 +986,6 @@ def fetch_filtered_leads(user_id: str, filters: Dict[str, Any]) -> List[Lead]:
             query = query.filter(Lead.phone.ilike(f'%{search_value}%'))
         elif search_field == 'status' and search_value:
             query = query.filter(Lead.status.ilike(f'%{search_value}%'))
-        elif search_field == 'note' and search_value:
-             query = query.filter(Lead.note.ilike(f'%{search_value}%'))
-
 
         # Date range filtering (used by /report [timeframe])
         start_date = filters.get('start_date')
@@ -1152,8 +1139,7 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (0, 0), 0.5, colors.grey), # Add grid only for the first column header
-        ('GRID', (0, 1), (-1, -1), 0.5, colors.lightgrey), # Grid for data rows
+        ('GRID', (0, 0), (-1, 0), 0.5, colors.grey),
     ]))
 
     story.append(data_table)
@@ -1768,10 +1754,10 @@ def process_whatsapp_update_sync(data: Dict[str, Any]):
         # Handle Interactive Messages (Reply Buttons)
         if message_type == 'interactive' and 'button_reply' in message_data['interactive']:
             button_id = message_data['interactive']['button_reply']['id']
-            # All our button IDs start with CMD_
             if button_id.startswith('CMD_'):
-                # Send the CMD_... ID directly to the command handler
-                _handle_command_message(sender_wa_id, button_id)
+                # Convert CMD_command to /command
+                command_with_arg = button_id.replace('CMD_', '/')
+                _handle_command_message(sender_wa_id, command_with_arg)
                 return
 
         if message_type != 'text':
@@ -1803,507 +1789,113 @@ def process_whatsapp_update_sync(data: Dict[str, Any]):
 
 
 def _handle_command_message(sender_wa_id: str, message_body: str):
-    """
-    Helper function to parse and route commands.
-    Handles both /command [arg] format and CMD_BUTTON_ID format.
-    """
-    is_button_command = message_body.startswith('CMD_')
+    """Helper function to parse and route commands."""
+    parts = message_body.split(maxsplit=1)
+    command = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
     
-    if is_button_command:
-        # Button command (e.g., CMD_PIPELINE)
-        command = message_body
-        arg = ""
-        logging.info(f"Received button command: {command}")
-        
-    else:
-        # Text command (e.g., /status 100 Hot)
-        parts = message_body.split(maxsplit=1)
-        command = parts[0].lower()
-        arg = parts[1] if len(parts) > 1 else ""
-        logging.info(f"Received text command: {command} with arg: {arg}")
-        
-        # Standardize command to remove space for parsing consistency (e.g., /my leads -> /myleads)
-        if command in ['/my', '/add', '/set', '/followup', '/save']:
-            if len(parts) > 1:
-                sub_command_parts = arg.split(maxsplit=1)
-                sub_command = sub_command_parts[0].lower()
-                
-                if command == '/my' and sub_command in ['leads', 'followups']:
-                     command = f'/my{sub_command}'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/add' and sub_command == 'note':
-                     command = '/addnote'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/set' and sub_command in ['followup']:
-                     command = '/setfollowup'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                # Handle /followupdone/cancel/reschedule/setfollowup as specific tags
-                elif command == '/followup' and sub_command in ['done', 'cancel', 'reschedule']:
-                     command = f'/followup{sub_command}'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/save' and sub_command == 'lead':
-                     command = '/savelead'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-
+    # Standardize command to remove space for parsing consistency (e.g., /my leads -> /myleads)
+    # This also handles /add note [id] [text] -> /addnote [id] [text]
+    if command in ['/my', '/add', '/set', '/followup', '/save']:
+        if len(parts) > 1:
+            sub_command_parts = arg.split(maxsplit=1)
+            sub_command = sub_command_parts[0].lower()
+            
+            if command == '/my' and sub_command in ['leads', 'followups']:
+                 command = f'/my{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/add' and sub_command == 'note':
+                 command = '/addnote'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/set' and sub_command in ['followup']:
+                 command = '/setfollowup'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            # Handle /followupdone/cancel/reschedule/setfollowup as specific tags
+            elif command == '/followup' and sub_command in ['done', 'cancel', 'reschedule']:
+                 command = f'/followup{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/save' and sub_command == 'lead':
+                 command = '/savelead'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
 
     local_session = Session()
     try:
-        # --- COMMAND ROUTING (Text Commands) ---
-        if not is_button_command:
-            # Commands available to all (license info, help, registration commands)
-            if command == '/start':
-                _cmd_start_sync(sender_wa_id)
-            elif command == '/licensesetup' or command == '/licenseinfo':
-                _cmd_license_setup_sync(sender_wa_id)
-            elif command == '/activate':
-                _cmd_activate_sync(sender_wa_id, arg)
-            elif command == '/renew':
-                _cmd_renew_sync(sender_wa_id)
-            elif command == '/help':
-                _cmd_help_sync(sender_wa_id)
-            elif command == '/debugjobs':
-                _cmd_debug_jobs_sync(sender_wa_id)
-            # Core/Admin Commands (Text)
-            elif command == '/myfollowups':
-                _next_followups_cmd_sync(sender_wa_id, scope='personal')
-            elif command == '/myleads': 
-                _search_cmd_sync(sender_wa_id, arg, scope='personal') 
-            elif command == '/dailysummary':
-                _daily_summary_control_sync(sender_wa_id, arg)
-            elif command == '/pipeline':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='personal') # Default to personal pipeline
-            elif command == '/setcompanyname':
-                _cmd_set_company_name_sync(sender_wa_id, arg)
-            elif command == '/addagent':
-                _cmd_add_agent_sync(sender_wa_id, arg)
-            elif command == '/removeagent':
-                _cmd_remove_agent_sync(sender_wa_id, arg)
-            elif command == '/remainingslots':
-                _cmd_remaining_slots_sync(sender_wa_id)
-            elif command == '/teamleads':
-                _search_cmd_sync(sender_wa_id, arg, scope='team')
-            elif command == '/teamfollowups':
-                _next_followups_cmd_sync(sender_wa_id, scope='team')
-            elif command == '/search':
-                _search_cmd_sync(sender_wa_id, arg, scope='team')
-            elif command.startswith('/report'):
-                if command == '/report':
-                    if not arg:
-                        _report_follow_up_prompt(sender_wa_id)
-                    else:
-                        _report_cmd_sync_with_arg(sender_wa_id, arg)
+        # Commands available to all (license info, help, registration commands)
+        if command == '/start':
+            _cmd_start_sync(sender_wa_id)
+        elif command == '/licensesetup' or command == '/licenseinfo':
+            _cmd_license_setup_sync(sender_wa_id)
+        elif command == '/activate':
+            _cmd_activate_sync(sender_wa_id, arg)
+        elif command == '/renew': # NEW RENEW COMMAND
+            _cmd_renew_sync(sender_wa_id)
+        elif command == '/help': # NEW HELP COMMAND
+            _cmd_help_sync(sender_wa_id)
+        elif command == '/debugjobs':
+            _cmd_debug_jobs_sync(sender_wa_id)
+
+        # Commands restricted to Active License holders (Note: Handlers contain the check)
+        elif command == '/myfollowups':
+            _next_followups_cmd_sync(sender_wa_id, scope='personal') # BUGFIX: Added scope
+        elif command == '/myleads': 
+            # Search with no arguments defaults to personal leads (RBAC query handles this)
+            _search_cmd_sync(sender_wa_id, arg, scope='personal') 
+        elif command == '/dailysummary':
+            _daily_summary_control_sync(sender_wa_id, arg)
+        elif command == '/pipeline':
+            # BUGFIX: Use personal scope for pipeline when /pipeline is called without argument
+            _pipeline_view_cmd_sync(sender_wa_id, scope='personal')
+        elif command == '/setcompanyname':
+            _cmd_set_company_name_sync(sender_wa_id, arg)
+        elif command == '/addagent':
+            _cmd_add_agent_sync(sender_wa_id, arg)
+        elif command == '/removeagent':
+            _cmd_remove_agent_sync(sender_wa_id, arg)
+        elif command == '/remainingslots':
+            _cmd_remaining_slots_sync(sender_wa_id)
+        elif command == '/teamleads':
+            # BUGFIX: Use team scope for team leads
+            _search_cmd_sync(sender_wa_id, arg, scope='team')
+        elif command == '/teamfollowups':
+            # BUGFIX: Use team scope for team followups
+            _team_followups_cmd_sync(sender_wa_id)
+        elif command == '/search':
+            _search_cmd_sync(sender_wa_id, arg, scope='team') # Search is typically a team function
+        elif command.startswith('/report'):
+            if command == '/report':
+                if not arg:
+                    _report_follow_up_prompt(sender_wa_id)
                 else:
-                     # Command like /reporttext [timeframe]
-                     file_type = command.replace('/report', '')
-                     if file_type.startswith('text'): file_type = 'text'
-                     elif file_type.startswith('excel'): file_type = 'excel'
-                     elif file_type.startswith('pdf'): file_type = 'pdf'
-                     # The arg passed to the handler is the date range
-                     _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}") 
-            elif command == '/status':
-                _status_update_cmd_sync(sender_wa_id, arg)
-            elif command in ['/setfollowup', '/followupdone', '/followupcancel', '/followupreschedule']:
-                _handle_followup_cmd_sync(sender_wa_id, message_body)
-            elif command == '/addnote':
-                _cmd_add_note_sync(sender_wa_id, arg)
-            elif command == '/savelead' or command == '/lead':
-                _process_incoming_lead_sync(sender_wa_id, arg)
-            elif command == '/register':
-                send_whatsapp_message(sender_wa_id, f"🔗 To register and purchase a new license, please visit our secure portal: 🌐 https://triageai.online/")
+                    _report_cmd_sync_with_arg(sender_wa_id, arg)
             else:
-                send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
-                
-        # --- COMMAND ROUTING (Button Commands) ---
+                 # Command like /reporttext [timeframe]
+                 file_type = command.replace('/report', '')
+                 if file_type.startswith('text'): file_type = 'text'
+                 elif file_type.startswith('excel'): file_type = 'excel'
+                 elif file_type.startswith('pdf'): file_type = 'pdf'
+                 _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}")
+        elif command == '/status':
+            _status_update_cmd_sync(sender_wa_id, arg)
+        elif command in ['/setfollowup', '/followupdone', '/followupcancel', '/followupreschedule']:
+            # Pass the full command to the generic handler
+            _handle_followup_cmd_sync(sender_wa_id, message_body)
+        elif command == '/addnote':
+            _cmd_add_note_sync(sender_wa_id, arg)
+        elif command == '/savelead': 
+            _process_incoming_lead_sync(sender_wa_id, arg)
+        elif command == '/register':
+             # New users hitting /register explicitly go to the web purchase page
+            send_whatsapp_message(sender_wa_id, f"🔗 To register and purchase a new license, please visit our secure portal: 🌐 https://triageai.online/")
         else:
-            if command == 'CMD_ADD_LEAD':
-                _cmd_add_lead_menu(sender_wa_id)
-            elif command == 'CMD_PIPELINE':
-                _cmd_pipeline_menu(sender_wa_id)
-            elif command == 'CMD_FOLLOWUPS':
-                _cmd_followups_menu(sender_wa_id)
-            elif command == 'CMD_REPORTS':
-                _cmd_reports_menu(sender_wa_id)
-            elif command == 'CMD_SEARCH':
-                _cmd_search_menu(sender_wa_id)
-            elif command == 'CMD_SETTINGS':
-                _cmd_settings_menu(sender_wa_id)
-                
-            # Admin Buttons from Main Menu
-            elif command == 'CMD_TEAM_PIPELINE':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='team')
-            elif command == 'CMD_TEAM_REPORT':
-                _cmd_reports_menu(sender_wa_id, scope='team')
-            elif command == 'CMD_ADD_AGENT':
-                _cmd_add_agent_menu(sender_wa_id)
-                
-            # --- Sub-Menu Implementations ---
-            
-            # 2.1 ADD LEAD
-            elif command == 'CMD_LEAD_QUICK':
-                 send_whatsapp_message(sender_wa_id, "📝 *Quick Add:* Reply with *only the Lead ID and Status* to update the last saved lead (e.g., `100 Hot`).")
-            elif command == 'CMD_LEAD_AI':
-                 send_whatsapp_message(sender_wa_id, "🤖 *AI Add:* Paste the full chat message (name, phone, status, notes, followup time) and send it as a single message.")
-            elif command == 'CMD_LEAD_MINIMAL':
-                 send_whatsapp_message(sender_wa_id, "📞 *Minimal Add:* Reply with *only the lead's Name and Phone Number* (e.g., `Rahul 919876543210`). Status defaults to 'New'.")
-
-            # 2.2 PIPELINE VIEW
-            elif command == 'CMD_PIPELINE_PERSONAL':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='personal')
-            elif command == 'CMD_PIPELINE_TEAM':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='team')
-            elif command == 'CMD_LIST_NEW':
-                 _search_cmd_sync(sender_wa_id, "status New", scope='personal')
-            elif command == 'CMD_LIST_HOT':
-                 _search_cmd_sync(sender_wa_id, "status Hot", scope='personal')
-            elif command == 'CMD_LIST_FOLLOWUP':
-                 _search_cmd_sync(sender_wa_id, "status Follow-Up", scope='personal')
-            elif command == 'CMD_LIST_CONVERTED':
-                 _search_cmd_sync(sender_wa_id, "status Converted", scope='personal')
-
-            # 2.3 FOLLOW-UPS
-            elif command == 'CMD_FU_TODAY':
-                 send_whatsapp_message(sender_wa_id, "❌ Follow-up listing by today is not supported yet. Use `/myfollowups` to see next 5 pending.")
-            elif command == 'CMD_FU_PENDING':
-                _next_followups_cmd_sync(sender_wa_id, scope='personal')
-            elif command == 'CMD_FU_MISSED':
-                 _search_cmd_sync(sender_wa_id, "followup_status Missed", scope='personal')
-            elif command == 'CMD_FU_DONE':
-                 send_whatsapp_message(sender_wa_id, "✅ *Mark Done:* Reply with `/followupdone [Lead ID]` to confirm a completed follow-up.")
-            elif command == 'CMD_FU_RESCHEDULE':
-                 send_whatsapp_message(sender_wa_id, "♻️ *Reschedule:* Reply with `/followupreschedule [Lead ID] [New Date/Time]` (e.g., `100 tomorrow 11am`).")
-                
-            # 2.4 REPORTS (Text/File Generation)
-            elif command == 'CMD_REPORT_TODAY':
-                _report_cmd_sync_with_arg(sender_wa_id, "today")
-            elif command == 'CMD_REPORT_WEEK':
-                _report_cmd_sync_with_arg(sender_wa_id, "this week")
-            elif command == 'CMD_REPORT_MONTH':
-                _report_cmd_sync_with_arg(sender_wa_id, "this month")
-            elif command == 'CMD_REPORT_CUSTOM':
-                _report_follow_up_prompt(sender_wa_id)
-            elif command == 'CMD_REPORT_XLSX':
-                 # XLSX button at top level defaults to current month
-                _report_file_cmd_sync(sender_wa_id, 'excel', "/reportexcel this month")
-            elif command == 'CMD_REPORT_PDF':
-                 # PDF button at top level defaults to current month
-                _report_file_cmd_sync(sender_wa_id, 'pdf', "/reportpdf this month")
-                
-            # 2.5 SEARCH
-            elif command == 'CMD_SEARCH_NAME':
-                send_whatsapp_message(sender_wa_id, "🔍 *Search Name:* Reply with `/search name [Partial Name]` (e.g., `/search name Rahul`).")
-            elif command == 'CMD_SEARCH_PHONE':
-                send_whatsapp_message(sender_wa_id, "📞 *Search Phone:* Reply with `/search phone [Full or Partial Phone]` (e.g., `/search phone 98765`).")
-            elif command == 'CMD_SEARCH_STATUS':
-                send_whatsapp_message(sender_wa_id, "🎯 *Search Status:* Reply with `/search status [Status]` (e.g., `/search status Hot`).")
-            elif command == 'CMD_SEARCH_NOTES':
-                send_whatsapp_message(sender_wa_id, "📝 *Search Notes:* Reply with `/search note [Keyword]` (e.g., `/search note interested in product X`).")
-            elif command == 'CMD_CLEAR_SEARCH':
-                 send_whatsapp_message(sender_wa_id, "🔍 *Clear Search:* To see all your leads again, send `/myleads`.")
-
-            # 2.6 SETTINGS
-            elif command == 'CMD_SUMMARY_ON':
-                _daily_summary_control_sync(sender_wa_id, "on")
-            elif command == 'CMD_SUMMARY_OFF':
-                _daily_summary_control_sync(sender_wa_id, "off")
-            elif command == 'CMD_VIEW_PROFILE':
-                 _cmd_license_setup_sync(sender_wa_id) # Use the existing license info command as profile view
-            elif command == 'CMD_HELP':
-                _cmd_help_sync(sender_wa_id)
-            elif command == 'CMD_RENEW':
-                _cmd_renew_sync(sender_wa_id)
-            elif command == 'CMD_LIST_AGENTS':
-                 _cmd_list_agents_sync(sender_wa_id)
-            elif command == 'CMD_REMOVE_AGENT':
-                send_whatsapp_message(sender_wa_id, "🚫 *Remove Agent:* Reply with `/removeagent [WA Phone No.]` (e.g., `919876543210`).")
-            elif command == 'CMD_AGENT_INVITE':
-                send_whatsapp_message(sender_wa_id, "➕ *Add Member:* Reply with `/addagent [WA Phone No.]` (e.g., `919876543210`). The member must have messaged the bot at least once.")
-            
-            # Missing lead/followup contextual buttons are not implemented here as they require Lead ID context not available via main menus.
-
-
+            send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
     finally:
         # Commands that modify the DB will commit inside their function.
         local_session.close()
 
 
 # =========================================================================
-# WHATSAPP HANDLER IMPLEMENTATIONS (SYNC) - ADDING NEW MENU/BUTTON COMMANDS
+# WHATSAPP HANDLER IMPLEMENTATIONS (SYNC)
 # =========================================================================
-
-def _cmd_list_agents_sync(user_id: str):
-    """Admin feature: List all agents in the company."""
-    if not _check_admin_permissions(user_id, "/listagents"):
-        return
-
-    local_session = Session()
-    try:
-        _, company_id, _, _, _ = get_agent_company_info(user_id)
-        
-        company = local_session.query(Company).get(company_id)
-        agents = local_session.query(Agent).filter(Agent.company_id == company_id).all()
-        
-        if not agents:
-            send_whatsapp_message(user_id, f"❌ No agents found for *{company.name}*.")
-            return
-
-        message = f"👥 *Agents for {company.name}* ({len(agents)} Total)\n\n"
-        
-        for agent in agents:
-            status = "👑 Admin" if agent.is_admin else "✅ Active Agent"
-            message += f"• `{agent.user_id}` ({status})\n"
-            
-        send_whatsapp_message(user_id, message)
-    finally:
-        local_session.close()
-
-def _cmd_add_lead_menu(user_id: str):
-    """Generates the Add Lead menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to add leads. Send `/renew` or `/licensesetup`.")
-        return
-        
-    buttons = [
-        {"text": "📝 Quick Add", "command": "CMD_LEAD_QUICK"},
-        {"text": "🤖 AI Add (Message)", "command": "CMD_LEAD_AI"},
-        {"text": "📞 Minimal Add", "command": "CMD_LEAD_MINIMAL"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "How do you want to add the lead?\n\n*📝 Quick Add* updates the last lead. *🤖 AI Add* is for pasting chat transcripts. *📞 Minimal Add* requires just name/phone.",
-        buttons=buttons
-    )
-
-def _cmd_pipeline_menu(user_id: str):
-    """Generates the Pipeline menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
-        return
-        
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    # Send the personal pipeline view first
-    pipeline_text = format_pipeline_text(user_id, scope='personal')
-    
-    buttons = [
-        {"text": "👤 My Pipeline", "command": "CMD_PIPELINE_PERSONAL"},
-        {"text": "🟢 New Leads", "command": "CMD_LIST_NEW"},
-        {"text": "🔥 Hot Leads", "command": "CMD_LIST_HOT"},
-    ]
-    
-    if is_admin and is_active:
-         buttons.append({"text": "🏢 Team Pipeline", "command": "CMD_PIPELINE_TEAM"})
-
-    send_whatsapp_message(
-        user_id,
-        f"{pipeline_text}\n\n*Choose a view to see the leads in that stage:*",
-        buttons=buttons
-    )
-
-def _cmd_followups_menu(user_id: str):
-    """Generates the Follow-ups menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for follow-ups. Send `/renew` or `/licensesetup`.")
-        return
-
-    buttons = [
-        {"text": "⏳ Pending Follow-ups", "command": "CMD_FU_PENDING"},
-        {"text": "⚠️ Missed Follow-ups", "command": "CMD_FU_MISSED"},
-        {"text": "✔️ Mark as Done", "command": "CMD_FU_DONE"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "Choose follow-up action:",
-        buttons=buttons
-    )
-
-def _cmd_reports_menu(user_id: str, scope: str = 'personal'):
-    """Generates the Reports menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
-        return
-
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    buttons = [
-        {"text": "📅 Today's Report", "command": "CMD_REPORT_TODAY"},
-        {"text": "🗓️ This Week", "command": "CMD_REPORT_WEEK"},
-        {"text": "📆 This Month", "command": "CMD_REPORT_MONTH"},
-    ]
-    
-    # Add file download options as the next 3 buttons (limit is 3 in one message)
-    # The user is expected to choose a date range first, then file type (handled in the next step/reply).
-    # Since we need to show file types, we'll put the custom range prompt in a separate message.
-    
-    # If this is the secondary Team Report menu, adjust the message
-    if scope == 'team' and is_admin and is_active:
-         message_body = "👑 *Team Report Generation: Step 1 (Timeframe)*\n\nChoose the time frame to generate a team report."
-    else:
-         message_body = "📁 *Report Generation: Step 1 (Timeframe)*\n\nChoose the time frame for your personal report."
-
-    send_whatsapp_message(
-        user_id,
-        message_body,
-        buttons=buttons
-    )
-
-    # Follow up with a second message for the advanced options
-    advanced_buttons = [
-        {"text": "📊 Excel Download", "command": "CMD_REPORT_XLSX"},
-        {"text": "📘 PDF Download", "command": "CMD_REPORT_PDF"},
-        {"text": "📝 Custom Range", "command": "CMD_REPORT_CUSTOM"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "*Or choose a file format/custom period:* (Downloads default to this month's data)",
-        buttons=advanced_buttons
-    )
-
-
-def _cmd_search_menu(user_id: str):
-    """Generates the Search menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send `/renew` or `/licensesetup`.")
-        return
-        
-    buttons = [
-        {"text": "🔍 Search Name", "command": "CMD_SEARCH_NAME"},
-        {"text": "📞 Search Phone", "command": "CMD_SEARCH_PHONE"},
-        {"text": "🎯 Search Status", "command": "CMD_SEARCH_STATUS"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "What do you want to search? (A text command reply is expected for the next step.)",
-        buttons=buttons
-    )
-    
-    # Follow up with the rest of the options in a second message
-    advanced_search_buttons = [
-         {"text": "📝 Search Notes", "command": "CMD_SEARCH_NOTES"},
-         {"text": "🧹 Clear Search", "command": "CMD_CLEAR_SEARCH"},
-         {"text": "🔙 Main Menu", "command": "CMD_START"}
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "*More options:* (Search is team-wide if you are an admin)",
-        buttons=advanced_search_buttons
-    )
-
-
-def _cmd_settings_menu(user_id: str):
-    """Generates the Settings menu with buttons."""
-    
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    buttons = [
-        {"text": "🔔 Daily Summary ON", "command": "CMD_SUMMARY_ON"},
-        {"text": "🔕 Daily Summary OFF", "command": "CMD_SUMMARY_OFF"},
-        {"text": "📄 My Profile/License", "command": "CMD_VIEW_PROFILE"},
-    ]
-    
-    # Add Admin/Renewal options if applicable
-    if is_admin:
-         buttons.append({"text": "➕ Add Team Member", "command": "CMD_ADD_AGENT"})
-    
-    if is_admin or not company_id: # Admin or individual (can buy)
-         buttons.append({"text": "🔄 Renew/Purchase License", "command": "CMD_RENEW"})
-         
-    # Ensure button list doesn't exceed the limit for the first message (max 3)
-    if len(buttons) > 3:
-        initial_buttons = buttons[:3]
-        final_buttons = buttons[3:]
-    else:
-        initial_buttons = buttons
-        final_buttons = []
-        
-    send_whatsapp_message(
-        user_id,
-        "Manage your bot settings ⚙️",
-        buttons=initial_buttons
-    )
-    
-    if final_buttons:
-        final_buttons.append({"text": "🆘 Help", "command": "CMD_HELP"})
-        send_whatsapp_message(
-            user_id,
-            "More settings...",
-            buttons=final_buttons
-        )
-    
-def _cmd_add_agent_menu(user_id: str):
-    """Admin feature: Provides agent management menu."""
-    if not _check_admin_permissions(user_id, "Agent Management"):
-        return
-        
-    buttons = [
-        {"text": "➕ Add Member (Invite)", "command": "CMD_AGENT_INVITE"},
-        {"text": "👥 View Current Agents", "command": "CMD_LIST_AGENTS"},
-        {"text": "🚫 Remove Member", "command": "CMD_REMOVE_AGENT"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "👑 *Agent Management Menu*",
-        buttons=buttons
-    )
-
-
-def _cmd_start_sync(user_id: str):
-    """Handles /start command, displaying the main button menu."""
-    _register_agent_sync(user_id)
-
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    company_name = "TriageAI Personal Workspace"
-    if company_id:
-        local_session = Session()
-        try:
-             company_name = local_session.query(Company).get(company_id).name
-        finally:
-             local_session.close()
-
-    message = f"👋 *Welcome to TriageAI, {company_name}!* (via WhatsApp)\n\nChoose an action below 👇"
-    
-    # Base buttons for all users (Active license is required for most features)
-    buttons = [
-        {"text": "➕ Add Lead", "command": "CMD_ADD_LEAD"},
-        {"text": "📊 Pipeline View", "command": "CMD_PIPELINE"},
-        {"text": "📅 Follow-ups", "command": "CMD_FOLLOWUPS"},
-    ]
-    
-    # Second message for remaining buttons (max 3 per message)
-    secondary_buttons = [
-        {"text": "📁 Reports", "command": "CMD_REPORTS"},
-        {"text": "🔍 Search", "command": "CMD_SEARCH"},
-        {"text": "🔧 Settings", "command": "CMD_SETTINGS"},
-    ]
-    
-    # Add Admin-specific buttons if licensed and admin
-    if is_admin and is_active:
-        secondary_buttons.append({"text": "👥 Team Pipeline", "command": "CMD_TEAM_PIPELINE"})
-        
-    # Ensure we don't exceed 3 buttons in the second message either
-    if len(secondary_buttons) > 3:
-         tertiary_buttons = secondary_buttons[3:]
-         secondary_buttons = secondary_buttons[:3]
-    else:
-         tertiary_buttons = []
-        
-    # Send First Message
-    send_whatsapp_message(user_id, message, buttons=buttons)
-    
-    # Send Second Message
-    if secondary_buttons:
-        send_whatsapp_message(user_id, "More actions...", buttons=secondary_buttons)
-        
-    # Send Third Message (if needed, e.g., for Team Pipeline button)
-    if tertiary_buttons:
-        send_whatsapp_message(user_id, "Admin actions...", buttons=tertiary_buttons)
-
 
 def _register_agent_sync(user_id: str):
     """Ensures agent and setting exist."""
@@ -2398,7 +1990,6 @@ def _cmd_help_sync(user_id: str):
     
     welcome_text = (
         f"👋 *TriageAI Command Tags List*\n\n"
-        f"Send `/start` for the main button menu.\n\n"
         f"{core_commands}\n"
         f"{reporting_commands}\n"
         f"{admin_commands}\n"
@@ -2407,19 +1998,61 @@ def _cmd_help_sync(user_id: str):
 
     send_whatsapp_message(user_id, welcome_text)
 
-# The rest of the original command implementations follow, ensuring they use the existing
-# logic and session management.
+def _cmd_start_sync(user_id: str):
+    """Handles /start command."""
+    _register_agent_sync(user_id) # Redundant call but ensures registration is complete
 
-# ... (Original implementations of _cmd_add_note_sync, _cmd_debug_jobs_sync, 
-# _next_followups_cmd_sync, _team_followups_cmd_sync, _daily_summary_control_sync,
-# _pipeline_view_cmd_sync, _team_leads_cmd_sync, _check_admin_permissions, 
-# _cmd_set_company_name_sync, _cmd_license_setup_sync, _cmd_renew_sync,
-# _cmd_activate_sync, _cmd_add_agent_sync, _cmd_verify_agent_otp_sync,
-# _cmd_remove_agent_sync, _cmd_remaining_slots_sync, _search_cmd_sync,
-# _report_cmd_sync_with_arg, _report_follow_up_prompt, _report_file_cmd_sync,
-# _send_text_report, _generate_and_send_file_sync, _status_update_cmd_sync,
-# _handle_followup_cmd_sync, _process_incoming_lead_sync, 
-# _send_admin_renewal_message_sync, _send_admin_welcome_message_sync_fixed) ...
+    company_name, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+
+    welcome_text = (
+        f"👋 *Welcome to TriageAI, {company_name}!* (via WhatsApp)\n"
+        f"I am your AI assistant, ready to capture and manage all your leads and follow-ups instantly.\n\n"
+    )
+
+    if not is_active and company_id and is_admin:
+         welcome_text += "⚠️ *LICENSE EXPIRED.* Send `/renew` immediately to restore access for your team.\n\n"
+    elif not is_active:
+        welcome_text += "⚠️ *Individual/Inactive Setup.* Send `/register` to purchase a new license or use `/activate [key]` to join a company. Send `/licensesetup` for details.\n\n"
+    elif is_active and company_id and is_admin:
+        welcome_text += "👑 *TriageAI Multi-Agent Admin Setup Active.*\n\n"
+    elif is_active and company_id and not is_admin:
+        welcome_text += "👥 *TriageAI Multi-Agent Agent Setup Active.* You manage your personal leads.\n\n"
+        
+    welcome_text += "Send `/help` for a compact list of all commands.\n"
+
+    # --- New Agent Commands for ALL Users (Visible on START but restricted later) ---
+    welcome_text += "### ⚡ *Core Lead Commands*\n"
+    welcome_text += "• Send a new lead directly or use: `/savelead [details]`\n"
+    welcome_text += "• `/myleads`: View all your personal leads.\n"
+    welcome_text += "• `/myfollowups`: See your next pending follow-ups.\n"
+    welcome_text += "• `/status [ID] [New|Hot|Converted]`: Update lead status.\n"
+    welcome_text += "• `/setfollowup [ID] [Date/Time]`: Reschedule/Set followup.\n"
+    welcome_text += "• `/addnote [ID] [Text]`: Add notes to a lead.\n\n"
+
+    # --- Admin Commands ---
+    if is_admin and is_active:
+        local_session = Session()
+        current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
+        limit = local_session.query(Company).get(company_id).license.agent_limit if company_id else 1
+        local_session.close()
+
+        welcome_text += "### 👑 *Admin Management*\n"
+        welcome_text += f"• `/remainingslots`: Check agent limits ({current_agents}/{limit}).\n"
+        welcome_text += "• `/addagent [WA Phone No.]`: Add a new agent (requires OTP verification).\n"
+        welcome_text += "• `/removeagent [WA Phone No.]`: Remove an agent.\n"
+        welcome_text += "• `/teamleads`: See the entire company pipeline.\n"
+        welcome_text += "• `/teamfollowups`: See all upcoming followups.\n"
+        welcome_text += "• `/setcompanyname [Name]`\n\n"
+
+    welcome_text += (
+        "### 📊 *Reporting & Utilities*\n"
+        "• `/pipeline`: See your/team's lead status counts.\n"
+        "• `/search [Keyword/Filter]`: Find specific leads.\n"
+        "• `/report`: Generate reports (e.g., `/report last week`).\n"
+        "• `/dailysummary on/off`: Control daily 8 PM summary.\n"
+    )
+
+    send_whatsapp_message(user_id, welcome_text)
 
 def _cmd_add_note_sync(user_id: str, arg: str):
     """Handles /addnote [ID] [text]"""
@@ -3034,7 +2667,7 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
             search_type = parts[0].lower()
             search_value = parts[1].strip()
 
-            if search_type in ['name', 'phone', 'status', 'note']:
+            if search_type in ['name', 'phone', 'status']:
                 filter_data = {'search_field': search_type, 'search_value': search_value}
 
         # BUGFIX: Use the correct scope when fetching leads for search
@@ -3098,9 +2731,9 @@ def _report_cmd_sync_with_arg(user_id: str, query: str):
     logging.info(f"🔘 Button will send this arg: '{report_arg}'")
 
     buttons = [
-        {"text": "📄 Text", "command": f"CMD_reporttext_{report_arg.replace(' ', '_')}"},
-        {"text": "📊 Excel", "command": f"CMD_reportexcel_{report_arg.replace(' ', '_')}"},
-        {"text": "📑 PDF", "command": f"CMD_reportpdf_{report_arg.replace(' ', '_')}"}
+        {"text": "📄 Text", "command": f"reporttext {report_arg}"},
+        {"text": "📊 Excel", "command": f"reportexcel {report_arg}"},
+        {"text": "📑 PDF", "command": f"reportpdf {report_arg}"}
     ]
 
     send_whatsapp_message(
@@ -3141,8 +2774,6 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
         
     local_session = Session()
     try:
-        # Extract the date range from the end of the command/button ID
-        # e.g., /reportpdf 2024-01-01 to 2024-01-31
         parts = full_command.split(maxsplit=1)
         original_query = parts[1] if len(parts) > 1 else ""
 
