@@ -3168,7 +3168,7 @@ def send_startup_message_sync():
     # Check if a dummy ID is used and provide a friendly local test number if available
     if to_user_id == "919999999999":
         # Placeholder for a local test number
-        to_user_id = os.getenv("TEST_ADMIN_PHONE", "917907603148")
+        to_user_id = os.getenv("TEST_ADMIN_PHONE", "918129522379")
 
     if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
         logging.error("Startup message skipped: WhatsApp credentials missing.")
