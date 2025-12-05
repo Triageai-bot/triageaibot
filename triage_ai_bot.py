@@ -13,7 +13,7 @@ import hashlib
 import uuid
 import time
 import traceback
-import random 
+import random
 
 # --- New Imports for Web Server ---
 from flask import Flask, request, jsonify, render_template
@@ -51,13 +51,7 @@ except ImportError:
 
 
 # ==============================
-# 1. FSM STATES (Placeholder Classes)
-# ==============================
-# Removed FSM states for simplified text-based flow
-
-
-# ==============================
-# 2. CONFIG & SETUP
+# 1. CONFIG & SETUP
 # ==============================
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -75,10 +69,9 @@ CORS(APP)
 WEB_AUTH_TOKEN = os.getenv("WEB_AUTH_TOKEN", "super_secret_web_key_123")
 
 # Placeholder: ADMIN_USER_ID must be a WhatsApp phone number string
-# NOTE: Removed automatic Admin setup for this ID to rely on purchase flow
 ADMIN_USER_ID = "919999999999"
 
-# MySQL Credentials (Assuming mysql.connector is available or configured via URI)
+# MySQL Credentials
 MYSQL_CREDS = {
     'host': 'localhost',
     'user': 'admin',
@@ -100,17 +93,12 @@ scheduler = BackgroundScheduler(
 
 client = genai.Client(api_key=GEMINI_KEY)
 
-# --- DUMMY PAYMENT CONFIG ---
+# --- PAYMENT CONFIG ---
 PLANS = {
-    # Individual Plan: 1 agent (Monthly is the base key)
     "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent)"},
     "individual_annual": {"agents": 1, "price": 249 * 12, "duration": timedelta(days=365), "label": "Individual (1 Agent)"},
-    
-    # 5-User Plan: Maps 5user monthly/annual keys from frontend
     "5user_monthly": {"agents": 5, "price": 1495, "duration": timedelta(days=30), "label": "5-User Team"},
     "5user_annual": {"agents": 5, "price": 1245 * 12, "duration": timedelta(days=365), "label": "5-User Team"},
-    
-    # 10-User Plan: Maps 10user monthly/annual keys from frontend
     "10user_monthly": {"agents": 10, "price": 2990, "duration": timedelta(days=30), "label": "10-User Pro"},
     "10user_annual": {"agents": 10, "price": 2490 * 12, "duration": timedelta(days=365), "label": "10-User Pro"},
 }
@@ -119,9 +107,11 @@ PLANS = {
 OTP_STORE: Dict[str, Dict[str, Any]] = {}
 
 # --- IN-MEMORY STATE FOR RENEWAL LINKS ---
-# Using RENEWAL_TOKEN_STORE for temporary token storage: {'token_uuid': {'phone': str, 'timestamp': datetime, 'is_verified': bool}}
 RENEWAL_TOKEN_STORE: Dict[str, Dict[str, Any]] = {}
 RENEWAL_TOKEN_TIMEOUT = timedelta(minutes=15)
+
+# --- USER STATE TRACKING FOR BUTTON NAVIGATION ---
+USER_STATE: Dict[str, Dict[str, Any]] = {}
 
 def generate_renewal_token(phone_number: str) -> str:
     """Generates a UUID for a personalized renewal link."""
@@ -130,12 +120,10 @@ def generate_renewal_token(phone_number: str) -> str:
         'phone': phone_number,
         'timestamp': datetime.now(TIMEZONE),
     }
-    # Clean up old tokens (optional, but good practice)
     now = datetime.now(TIMEZONE)
     expired_keys = [k for k, v in RENEWAL_TOKEN_STORE.items() if now - v['timestamp'] > RENEWAL_TOKEN_TIMEOUT]
     for key in expired_keys:
         del RENEWAL_TOKEN_STORE[key]
-        
     return token
 
 def generate_otp() -> str:
@@ -151,11 +139,8 @@ def verify_whatsapp_otp(phone_number: str, otp_input: str) -> bool:
         logging.warning(f"Verification failed for {phone_number}: No state found.")
         return False
 
-    # Check expiry (e.g., 5 minutes)
     if datetime.now(TIMEZONE) - state['timestamp'] > timedelta(minutes=5):
         logging.warning(f"Verification failed for {phone_number}: Expired.")
-        # Do NOT delete state immediately on expiry so we can give a proper message
-        # del OTP_STORE[phone_number]
         return False
 
     if state['otp'] == otp_input.strip():
@@ -165,14 +150,13 @@ def verify_whatsapp_otp(phone_number: str, otp_input: str) -> bool:
         state['attempts'] += 1
         logging.warning(f"Verification failed for {phone_number}: Mismatch (Attempt {state['attempts']}).")
         if state['attempts'] >= 5:
-             # Too many attempts, clear state
-             del OTP_STORE[phone_number]
-             logging.error(f"OTP state for {phone_number} purged due to excessive failures.")
+            del OTP_STORE[phone_number]
+            logging.error(f"OTP state for {phone_number} purged due to excessive failures.")
         return False
 
 
 # ==============================
-# 3. DATABASE SETUP & SCHEMA
+# 2. DATABASE SETUP & SCHEMA
 # ==============================
 
 encoded_password = urllib.parse.quote_plus(MYSQL_CREDS['password'])
@@ -238,7 +222,7 @@ class UserSetting(Base):
 class UserProfile(Base):
     """Stores temporary and persistent profile data for the web flow."""
     __tablename__ = "user_profiles"
-    phone = Column(String(255), primary_key=True) # WhatsApp Phone Number
+    phone = Column(String(255), primary_key=True)
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     company_name = Column(String(255))
@@ -250,7 +234,7 @@ Base.metadata.create_all(engine)
 
 
 # ==============================
-# 4. CORE UTILS - UPDATED
+# 3. CORE UTILS
 # ==============================
 
 def _sanitize_wa_id(to_wa_id: str) -> str:
@@ -260,11 +244,10 @@ def _sanitize_wa_id(to_wa_id: str) -> str:
         return ""
 
     to_wa_id = str(to_wa_id)
-
     sanitized_id = re.sub(r'\D', '', to_wa_id)
-    # Simple check for Indian numbers without country code (common error)
+    
     if len(sanitized_id) == 10 and sanitized_id.startswith(('6', '7', '8', '9')):
-        return "91" + sanitized_id # Assume India if 10 digits and starts with a mobile prefix
+        return "91" + sanitized_id
     return sanitized_id
 
 def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[List[Dict[str, str]]] = None):
@@ -285,19 +268,17 @@ def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[Li
     }
 
     if buttons:
-        # Limit to 3 buttons as per WhatsApp documentation for reply buttons
-        buttons_payload = []
-        for btn in buttons[:3]: 
-            # Check if command or direct ID is used. CMD_ is for webhook parsing.
-            command_id = btn.get('command') or btn.get('id', 'N/A')
-            # Ensure the ID is correctly prefixed for internal parsing
-            final_id = command_id if command_id.startswith('CMD_') else f"CMD_{command_id}" 
-
-            buttons_payload.append({
-                "type": "reply", 
-                "reply": {"id": final_id, "title": btn['text']}
+        # WhatsApp supports up to 3 buttons per message
+        button_list = []
+        for btn in buttons[:3]:  # Limit to 3 buttons
+            button_list.append({
+                "type": "reply",
+                "reply": {
+                    "id": f"CMD_{btn['command']}" if not btn['command'].startswith('CMD_') else btn['command'],
+                    "title": btn['text'][:20]  # Max 20 chars for button text
+                }
             })
-
+        
         payload = {
             "messaging_product": "whatsapp",
             "to": final_recipient,
@@ -306,7 +287,7 @@ def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[Li
                 "type": "button",
                 "body": {"text": text_message},
                 "action": {
-                    "buttons": buttons_payload
+                    "buttons": button_list
                 }
             }
         }
@@ -333,29 +314,72 @@ def send_whatsapp_message(to_wa_id: str, text_message: str, buttons: Optional[Li
                 logging.critical(f"FINAL FAILURE: Could not deliver message to {final_recipient} after {max_retries} attempts.")
                 return False
 
+def send_whatsapp_message_with_list(to_wa_id: str, header_text: str, body_text: str, button_text: str, sections: List[Dict[str, Any]]):
+    """Sends a WhatsApp list message with multiple options."""
+    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
+        logging.error("WhatsApp API credentials missing.")
+        return False
+
+    final_recipient = _sanitize_wa_id(to_wa_id)
+
+    if not final_recipient:
+        logging.error(f"Cannot send message, invalid recipient ID: {to_wa_id}")
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": final_recipient,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {
+                "type": "text",
+                "text": header_text[:60]
+            },
+            "body": {
+                "text": body_text
+            },
+            "action": {
+                "button": button_text[:20],
+                "sections": sections
+            }
+        }
+    }
+
+    try:
+        response = requests.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+        logging.info(f"Successfully sent list message to {final_recipient}")
+        return True
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to send list message to {final_recipient}: {e}")
+        return False
+
 def send_whatsapp_otp(phone_number: str, otp: str):
-    """MOCK: Simulates sending an OTP via WhatsApp, attempting delivery if possible."""
-    logging.info(f"🔑 MOCK OTP: Sending {otp} to {phone_number}...")
+    """Simulates sending an OTP via WhatsApp."""
+    logging.info(f"🔐 MOCK OTP: Sending {otp} to {phone_number}...")
 
     message = (
-        f"🔒 TriageAI OTP: Your verification code is *{otp}*. "
+        f"🔐 TriageAI OTP: Your verification code is *{otp}*. "
         f"For agent setup, reply with *only the code* to verify. "
         f"For web setup, enter it on the website."
     )
 
-    # Attempt to send the message using the actual WA API if configured
     send_whatsapp_message(phone_number, message)
 
-    # Store the OTP state
     phone_number = _sanitize_wa_id(phone_number)
     OTP_STORE[phone_number] = {
         'otp': otp,
         'timestamp': datetime.now(TIMEZONE),
         'attempts': 0,
         'is_verified': False,
-        'admin_id': None # Ensure web-originated OTP doesn't have an admin ID
+        'admin_id': None
     }
-
 
 def send_whatsapp_document(to_wa_id: str, file_content: BytesIO, filename: str, mime_type: str):
     """Uploads a document and sends it via WhatsApp Cloud API."""
@@ -365,7 +389,10 @@ def send_whatsapp_document(to_wa_id: str, file_content: BytesIO, filename: str, 
 
     final_recipient = _sanitize_wa_id(to_wa_id)
 
-    # --- STEP 1: Upload the media file ---
+    if not final_recipient:
+        logging.error(f"Cannot send message, invalid recipient ID: {to_wa_id}")
+        return
+
     upload_url = f"https://graph.facebook.com/v22.0/{WHATSAPP_PHONE_ID}/media"
 
     upload_headers = {
@@ -418,7 +445,6 @@ def send_whatsapp_document(to_wa_id: str, file_content: BytesIO, filename: str, 
         send_whatsapp_message(to_wa_id, "❌ An unexpected error occurred. Please try again.")
         return
 
-    # --- STEP 2: Send the document message ---
     send_headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
@@ -461,17 +487,15 @@ def send_whatsapp_document(to_wa_id: str, file_content: BytesIO, filename: str, 
         logging.error(f"❌ Unexpected error during send: {e}")
         send_whatsapp_message(to_wa_id, "❌ An unexpected error occurred while sending the file.")
 
-
 def get_agent_company_info(user_id: str):
     """Retrieves the agent's company and checks for license expiry."""
-    # Use global session for read-only access here
     agent = session.query(Agent).filter(Agent.user_id == user_id).first()
 
     company_name = "TriageAI Personal Workspace"
     company_id = None
     is_active = False
     is_admin = False
-    agent_phone = user_id # Default to user ID (WA ID)
+    agent_phone = user_id
 
     if agent:
         is_admin = agent.is_admin
@@ -484,22 +508,17 @@ def get_agent_company_info(user_id: str):
 
             if license and license.expires_at:
                 now_utc = datetime.utcnow()
-                # BUGFIX: Handle naive datetime comparison
                 license_expires_at_aware = pytz.utc.localize(license.expires_at)
                 now_utc_aware = pytz.utc.localize(now_utc)
                 if license_expires_at_aware > now_utc_aware:
                     is_active = True
                 else:
-                    # Deactivation logic is handled elsewhere, but mark as inactive here for access control
                     is_active = False
             elif license and license.is_active and license.expires_at is None:
-                 # Perpetual/Special License Case - treat as active
-                 is_active = True
-
+                is_active = True
 
     return (company_name, company_id, is_active, is_admin, agent_phone)
 
-# --- NEW: Access Control Helper ---
 def _check_active_license(user_id: str) -> bool:
     """Checks if the user is part of a company with an active, non-expired license."""
     _, _, is_active, _, _ = get_agent_company_info(user_id)
@@ -509,41 +528,31 @@ def hash_user_id(user_id: str) -> str:
     """Non-reversible hash of WhatsApp ID for secure reporting/external ID."""
     return hashlib.sha256(str(user_id).encode()).hexdigest()[:10]
 
-# --- FIX 4: get_user_leads_query to use local_session ---
 def get_user_leads_query(user_id: str, scope: str = 'personal', local_session=None):
     """
     Retrieves the base Lead query based on RBAC and desired scope.
-    'personal' scope is for /myleads, 'team' scope is for /teamleads.
     """
     if local_session is None:
-        local_session = session  # Fallback to global session (Discouraged for threads)
+        local_session = session
         
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-    # BUGFIX 1: Restrict personal commands to personal leads even if user is admin
     if scope == 'personal' or not (is_active and is_admin and company_id):
-        # Non-admins or un-licensed/individual users (and all users for /myleads) only see their own leads
-        logging.info(f"🔍 TriageAI Query: Using personal leads query for {user_id}")
+        logging.info(f"🔒 TriageAI Query: Using personal leads query for {user_id}")
         return local_session.query(Lead).filter(Lead.user_id == user_id)
     
-    # Team scope (only for active admins)
     elif scope == 'team' and is_active and is_admin and company_id:
-        # Admins see all leads for their company's agents
         company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
         agent_ids = [agent[0] for agent in company_agents]
-        logging.info(f"🔍 TriageAI Query: Using team leads query for company {company_id} ({len(agent_ids)} agents)")
-        # CRITICAL: This query is used for team commands and reports.
+        logging.info(f"🔒 TriageAI Query: Using team leads query for company {company_id} ({len(agent_ids)} agents)")
         return local_session.query(Lead).filter(Lead.user_id.in_(agent_ids))
     
     else:
-        # Fallback to personal if scope is team but user isn't an active admin.
-        logging.info(f"🔍 TriageAI Query: Falling back to personal leads query for {user_id} (Admin check failed)")
+        logging.info(f"🔒 TriageAI Query: Falling back to personal leads query for {user_id} (Admin check failed)")
         return local_session.query(Lead).filter(Lead.user_id == user_id)
-
 
 def extract_lead_data(text: str):
     """AI Lead Extraction using Gemini."""
-    # Convert UTC to IST for AI context
     current_time_ist = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
     prompt = f"""
@@ -561,7 +570,6 @@ def extract_lead_data(text: str):
     """
 
     try:
-        # Use the synchronous client call
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
@@ -582,7 +590,6 @@ def extract_lead_data(text: str):
 
 def check_duplicate(phone: str, user_id: str):
     """Checks for duplicate leads by phone, respecting RBAC."""
-    # Use a new local session for this read operation
     local_session = Session()
     try:
         _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
@@ -590,7 +597,6 @@ def check_duplicate(phone: str, user_id: str):
         phone = re.sub(r'\D', '', phone)
 
         if is_active and company_id:
-            # Company Agents check the entire company's leads
             company_agents = local_session.query(Agent.user_id).filter(Agent.company_id == company_id).all()
             agent_ids = [agent[0] for agent in company_agents]
 
@@ -599,13 +605,296 @@ def check_duplicate(phone: str, user_id: str):
                 Lead.phone == phone
             ).first()
         else:
-            # Individual agents only check their own leads
             return local_session.query(Lead).filter(
                 Lead.user_id == user_id,
                 Lead.phone == phone
             ).first()
     finally:
         local_session.close()
+
+
+# ==============================
+# 4. BUTTON MENU BUILDERS
+# ==============================
+
+def show_main_menu(user_id: str):
+    """Displays the main menu with buttons."""
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    
+    message = "👋 *Welcome to TriageAI!*\nChoose an action below:"
+    
+    buttons = [
+        {"text": "➕ Leads", "command": "LEADS_MENU"},
+        {"text": "📊 Reports", "command": "REPORTS_MENU"},
+        {"text": "⚙️ Settings", "command": "SETTINGS_MENU"}
+    ]
+    
+    # Add Team Management for admins
+    if is_admin and is_active and company_id:
+        # Since we can only send 3 buttons, we'll create a second message or use list
+        send_whatsapp_message(user_id, message, buttons)
+        
+        # Send admin button separately
+        admin_message = "👥 *Admin Actions:*"
+        admin_buttons = [
+            {"text": "👥 Team Mgmt", "command": "TEAM_MENU"}
+        ]
+        send_whatsapp_message(user_id, admin_message, admin_buttons)
+    else:
+        send_whatsapp_message(user_id, message, buttons)
+
+def show_leads_menu(user_id: str):
+    """Shows the Leads management menu."""
+    message = "📋 *Leads Management*\nChoose an option:"
+    
+    buttons = [
+        {"text": "➕ Add Lead", "command": "ADD_LEAD_SUBMENU"},
+        {"text": "📊 Pipeline", "command": "PIPELINE_SUBMENU"},
+        {"text": "📅 Follow-ups", "command": "FOLLOWUPS_SUBMENU"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    # Second set of buttons
+    buttons2 = [
+        {"text": "🔍 Search", "command": "SEARCH_SUBMENU"},
+        {"text": "🔙 Main Menu", "command": "START"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_add_lead_submenu(user_id: str):
+    """Shows options for adding a lead."""
+    message = "➕ *Add New Lead*\nHow would you like to add?"
+    
+    buttons = [
+        {"text": "📝 Manual", "command": "LEAD_MANUAL"},
+        {"text": "🤖 AI Extract", "command": "LEAD_AI"},
+        {"text": "🔙 Back", "command": "LEADS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+
+def show_pipeline_submenu(user_id: str):
+    """Shows pipeline filter options."""
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    
+    message = "📊 *Pipeline View*\nSelect filter:"
+    
+    buttons = [
+        {"text": "👤 My Pipeline", "command": "PIPELINE_PERSONAL"},
+        {"text": "🟢 New", "command": "LIST_NEW"},
+        {"text": "🔥 Hot", "command": "LIST_HOT"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "📆 Follow-up", "command": "LIST_FOLLOWUP"},
+        {"text": "✅ Converted", "command": "LIST_CONVERTED"},
+        {"text": "🔙 Back", "command": "LEADS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More filters:", buttons2)
+    
+    # Admin gets team option
+    if is_admin and is_active and company_id:
+        admin_buttons = [
+            {"text": "🏢 Team Pipeline", "command": "PIPELINE_TEAM"}
+        ]
+        send_whatsapp_message(user_id, "Admin view:", admin_buttons)
+
+def show_followups_submenu(user_id: str):
+    """Shows follow-up management options."""
+    message = "📅 *Follow-ups Manager*\nSelect option:"
+    
+    buttons = [
+        {"text": "📅 Today", "command": "FU_TODAY"},
+        {"text": "⏳ Pending", "command": "FU_PENDING"},
+        {"text": "⚠️ Overdue", "command": "FU_MISSED"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "✅ Completed", "command": "FU_DONE_LIST"},
+        {"text": "🔙 Back", "command": "LEADS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_search_submenu(user_id: str):
+    """Shows search options."""
+    message = "🔍 *Search Leads*\nSelect search type:"
+    
+    buttons = [
+        {"text": "👤 By Name", "command": "SEARCH_NAME"},
+        {"text": "📞 By Phone", "command": "SEARCH_PHONE"},
+        {"text": "🎯 By Status", "command": "SEARCH_STATUS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "📝 By Notes", "command": "SEARCH_NOTES"},
+        {"text": "🔙 Back", "command": "LEADS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_search_status_menu(user_id: str):
+    """Shows status filter options."""
+    message = "🎯 *Filter by Status*\nSelect:"
+    
+    buttons = [
+        {"text": "🟢 New", "command": "SEARCH_STATUS_NEW"},
+        {"text": "🔥 Hot", "command": "SEARCH_STATUS_HOT"},
+        {"text": "📆 Follow-up", "command": "SEARCH_STATUS_FOLLOWUP"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "✅ Converted", "command": "SEARCH_STATUS_CONVERTED"},
+        {"text": "🔙 Back", "command": "SEARCH_SUBMENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_reports_menu(user_id: str):
+    """Shows reports menu."""
+    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+    
+    message = "📊 *Reports & Analytics*\nChoose option:"
+    
+    buttons = [
+        {"text": "📅 Time Period", "command": "REPORT_PERIOD_MENU"},
+        {"text": "📥 Download", "command": "REPORT_DOWNLOAD_MENU"},
+        {"text": "🔙 Back", "command": "START"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    # Admin gets team reports
+    if is_admin and is_active and company_id:
+        admin_buttons = [
+            {"text": "🏢 Team Reports", "command": "TEAM_REPORT_MENU"}
+        ]
+        send_whatsapp_message(user_id, "Admin reports:", admin_buttons)
+
+def show_report_period_menu(user_id: str):
+    """Shows report period options."""
+    message = "📅 *Select Report Period*"
+    
+    buttons = [
+        {"text": "📅 Today", "command": "REPORT_TODAY"},
+        {"text": "🗓️ This Week", "command": "REPORT_WEEK"},
+        {"text": "📆 This Month", "command": "REPORT_MONTH"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "📆 Last Month", "command": "REPORT_LAST_MONTH"},
+        {"text": "🔙 Back", "command": "REPORTS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_report_download_menu(user_id: str):
+    """Shows download format options."""
+    message = "📥 *Choose Download Format*"
+    
+    buttons = [
+        {"text": "📄 Text", "command": "DOWNLOAD_TEXT"},
+        {"text": "📊 Excel", "command": "DOWNLOAD_XLSX"},
+        {"text": "📘 PDF", "command": "DOWNLOAD_PDF"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+
+def show_settings_menu(user_id: str):
+    """Shows settings menu."""
+    message = "⚙️ *Settings & Preferences*"
+    
+    buttons = [
+        {"text": "🔔 Notifications", "command": "NOTIFICATIONS_MENU"},
+        {"text": "👤 My Profile", "command": "VIEW_PROFILE"},
+        {"text": "📄 License", "command": "LICENSE_INFO"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "🆘 Help", "command": "HELP"},
+        {"text": "🔙 Back", "command": "START"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_notifications_menu(user_id: str):
+    """Shows notification settings."""
+    local_session = Session()
+    try:
+        setting = local_session.query(UserSetting).filter(UserSetting.user_id == user_id).first()
+        summary_status = "ON" if setting and setting.daily_summary_enabled else "OFF"
+        
+        message = f"🔔 *Notification Settings*\nDaily Summary: {summary_status}"
+        
+        buttons = [
+            {"text": "✅ Summary ON", "command": "SUMMARY_ON"},
+            {"text": "❌ Summary OFF", "command": "SUMMARY_OFF"},
+            {"text": "🔙 Back", "command": "SETTINGS_MENU"}
+        ]
+        
+        send_whatsapp_message(user_id, message, buttons)
+    finally:
+        local_session.close()
+
+def show_team_menu(user_id: str):
+    """Shows team management menu (Admin only)."""
+    if not _check_admin_permissions(user_id, "Team Menu"):
+        return
+    
+    message = "👥 *Team Management*\nAdmin Actions:"
+    
+    buttons = [
+        {"text": "📊 Team Pipeline", "command": "PIPELINE_TEAM"},
+        {"text": "📅 Team FUs", "command": "TEAM_FOLLOWUPS"},
+        {"text": "👥 Members", "command": "MANAGE_MEMBERS_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "📊 Reports", "command": "TEAM_REPORT_MENU"},
+        {"text": "🔙 Back", "command": "START"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
+def show_manage_members_menu(user_id: str):
+    """Shows member management options."""
+    if not _check_admin_permissions(user_id, "Manage Members"):
+        return
+    
+    message = "👥 *Member Management*"
+    
+    buttons = [
+        {"text": "➕ Add Member", "command": "ADD_AGENT"},
+        {"text": "👥 List Members", "command": "LIST_AGENTS"},
+        {"text": "📊 Slots", "command": "REMAINING_SLOTS"}
+    ]
+    
+    send_whatsapp_message(user_id, message, buttons)
+    
+    buttons2 = [
+        {"text": "🚫 Remove", "command": "REMOVE_AGENT_PROMPT"},
+        {"text": "🔙 Back", "command": "TEAM_MENU"}
+    ]
+    
+    send_whatsapp_message(user_id, "More options:", buttons2)
+
 
 # ==============================
 # 5. SCHEDULER LOGIC
@@ -621,7 +910,6 @@ def send_reminder(lead_id: int):
             logging.error(f"❌ Lead {lead_id} not found for reminder")
             return
         
-        # CRITICAL: Check license BEFORE sending reminder
         if not _check_active_license(lead.user_id):
             logging.warning(f"⚠️ Reminder skipped for Lead {lead_id} - user license inactive.")
             return
@@ -645,7 +933,6 @@ def send_reminder(lead_id: int):
             logging.error(f"❌ Followup date missing for Lead {lead_id} but status is Pending.")
             return
 
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         followup_dt_ist = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE)
 
         message = (
@@ -670,24 +957,14 @@ def send_reminder(lead_id: int):
         local_session.close()
 
 def schedule_followup(user_id: str, lead_id: int, name: str, phone: str, followup_dt: datetime):
-    """Schedules a reminder 15 minutes before followup. followup_dt is Naive UTC."""
-
-    # 1. Localize the naive UTC datetime to aware UTC
-    # BUGFIX: Ensure `followup_dt` is treated as UTC as it came from the DB in naive form
+    """Schedules a reminder 15 minutes before followup."""
     followup_dt_utc_aware = pytz.utc.localize(followup_dt)
-
-    # 2. Convert to the scheduler's timezone (IST)
     followup_dt_ist = followup_dt_utc_aware.astimezone(TIMEZONE)
-
-    # 3. Calculate reminder time (15 minutes before) in IST
     reminder_dt_ist = followup_dt_ist - timedelta(minutes=15)
 
     job_id = f"reminder_{lead_id}"
-
-    # 4. Check if the reminder time is in the future
     current_time_with_buffer = datetime.now(TIMEZONE) - timedelta(minutes=5)
 
-    # 5. Schedule the job using the localized IST time
     if reminder_dt_ist > current_time_with_buffer:
         try:
             scheduler.add_job(
@@ -730,17 +1007,14 @@ def daily_summary_job_sync():
         for setting in enabled_users:
             user_id = setting.user_id
             
-            # CRITICAL: Check license BEFORE sending summary
             if not _check_active_license(user_id):
                 local_session.query(UserSetting).filter(UserSetting.user_id == user_id).update({"daily_summary_enabled": False})
                 local_session.commit()
                 logging.warning(f"Daily summary disabled for {user_id}: License inactive.")
                 continue
 
-
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-            # NOTE: Daily summary uses the TEAM scope if available, otherwise personal.
             base_query = get_user_leads_query(user_id, scope='team' if is_admin else 'personal', local_session=local_session)
 
             data = base_query.filter(
@@ -755,18 +1029,15 @@ def daily_summary_job_sync():
 
             now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
 
-            # Pending/Missed follow-ups are strictly user-specific (not team-wide)
             pending_followups = local_session.query(Lead).filter(
                 Lead.user_id == user_id,
                 Lead.followup_status == "Pending",
-                # BUGFIX: Naive datetime comparison
                 Lead.followup_date >= now_utc.replace(tzinfo=None)
             ).count()
 
             missed_followups = local_session.query(Lead).filter(
                 Lead.user_id == user_id,
                 Lead.followup_status == "Pending",
-                # BUGFIX: Naive datetime comparison
                 Lead.followup_date < now_utc.replace(tzinfo=None)
             ).count()
 
@@ -774,8 +1045,7 @@ def daily_summary_job_sync():
             if is_admin and is_active and company_id:
                 report_scope = "TriageAI Daily Company Summary"
 
-            # FIX APPLIED HERE: Removed extraneous '-' and curly brace pair
-            text = f"☀️ *{report_scope} - {now_ist.strftime('%b %d')}*\n\n" 
+            text = f"☀️ *{report_scope} - {now_ist.strftime('%b %d')}*\n\n"
             text += f"Total Leads Today: *{total_today}*\n"
             text += f"Converted Today: *{status_counts.get('Converted', 0)}*\n"
             text += f"Hot Leads: *{status_counts.get('Hot', 0)}*\n"
@@ -798,12 +1068,10 @@ def _check_overdue_followups_sync():
 
         overdue_leads = local_session.query(Lead).filter(
             Lead.followup_status == "Pending",
-            # Only leads that were due and missed by more than 1 hour should be alerted
             Lead.followup_date < now_utc_naive - timedelta(minutes=60)
         ).all()
 
         for lead in overdue_leads:
-            # CRITICAL: Check license before processing. If inactive, don't spam.
             if not _check_active_license(lead.user_id):
                 logging.warning(f"Overdue check skipped for {lead.id}: User license inactive.")
                 cancel_followup_job(lead.id)
@@ -812,7 +1080,6 @@ def _check_overdue_followups_sync():
             lead.followup_status = "Missed"
             logging.warning(f"Followup for TriageAI Lead {lead.id} marked as Missed.")
 
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
 
             send_whatsapp_message(
@@ -821,7 +1088,6 @@ def _check_overdue_followups_sync():
                 f"{followup_time}."
                 f"\n\nSend `/followupreschedule {lead.id} [New Date/Time]` to fix it."
             )
-            # Remove the job since it won't fire again
             cancel_followup_job(lead.id)
 
         local_session.commit()
@@ -836,7 +1102,6 @@ def _check_overdue_followups_sync():
 # 6. REPORTING UTILS
 # ==============================
 
-# --- FIX 3: get_report_filters with robust date parsing ---
 def get_report_filters(query: str) -> Dict[str, Any]:
     """Implements explicit date parsing, shortcuts, and AI parsing for the query."""
     now_ist = datetime.now(TIMEZONE)
@@ -846,18 +1111,15 @@ def get_report_filters(query: str) -> Dict[str, Any]:
 
     start_of_month = now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # --- Default Case (Empty Query) ---
     if not query_lower:
-        logging.info("📝 Empty query, returning monthly report")
+        logging.info("🔍 Empty query, returning monthly report")
         return {"start_date": start_of_month, "end_date": now_ist, "label": "Monthly Report"}
 
     start_date_obj = None
     end_date_obj = None
     label = None
 
-    # --- CRITICAL: Handle Explicit Date Range Format FIRST: "YYYY-MM-DD to YYYY-MM-DD" ---
     if ' to ' in query_lower:
-        # More flexible pattern to handle single-digit months/days (though YYYY-MM-DD is preferred)
         date_pattern = r'(\d{4}-\d{1,2}-\d{1,2})\s+to\s+(\d{4}-\d{1,2}-\d{1,2})'
         match = re.search(date_pattern, query_lower)
 
@@ -866,7 +1128,6 @@ def get_report_filters(query: str) -> Dict[str, Any]:
                 start_str = match.group(1)
                 end_str = match.group(2)
 
-                # Use flexible parsing for safety, but typically the input should be YYYY-MM-DD
                 start_date_raw = datetime.strptime(start_str, '%Y-%m-%d')
                 start_date_obj = TIMEZONE.localize(start_date_raw.replace(hour=0, minute=0, second=0, microsecond=0))
 
@@ -881,7 +1142,6 @@ def get_report_filters(query: str) -> Dict[str, Any]:
             except ValueError as e:
                 logging.warning(f"⚠️ Failed to parse explicit date range: {e}")
 
-    # --- Handle Common Shortcuts (only if explicit range not found) ---
     if query_lower in ["today", "daily"]:
         start_date_obj = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date_obj = now_ist
@@ -897,7 +1157,6 @@ def get_report_filters(query: str) -> Dict[str, Any]:
     elif query_lower == "last week":
         start_of_this_week = now_ist.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=now_ist.weekday())
         start_date_obj = start_of_this_week - timedelta(weeks=1)
-        # BUGFIX: Ensure end_date for last week is end of day for consistency
         end_date_obj = start_of_this_week - timedelta(microseconds=1)
         label = "Last Week Report"
 
@@ -919,7 +1178,6 @@ def get_report_filters(query: str) -> Dict[str, Any]:
         end_date_obj = now_ist
         label = "Monthly Report"
 
-    # --- AI Parsing for Custom/Complex Range (only if nothing matched above) ---
     if start_date_obj is None and end_date_obj is None:
         logging.info(f"🤖 No shortcut matched, calling AI extraction for: '{query}'")
         extracted = extract_lead_data(query) or {}
@@ -939,7 +1197,6 @@ def get_report_filters(query: str) -> Dict[str, Any]:
         except ValueError as e:
             logging.warning(f"⚠️ Error parsing AI dates: {e}")
 
-    # --- Final Fallback ---
     if start_date_obj is None:
         logging.warning(f"⚠️ No valid start date, using start of month")
         start_date_obj = start_of_month
@@ -948,12 +1205,10 @@ def get_report_filters(query: str) -> Dict[str, Any]:
         logging.warning(f"⚠️ No valid end date, using now")
         end_date_obj = now_ist
 
-    # Ensure start is before end
     if start_date_obj > end_date_obj:
         logging.warning(f"⚠️ Swapping dates: {start_date_obj} <-> {end_date_obj}")
         start_date_obj, end_date_obj = end_date_obj, start_date_obj
 
-    # --- Determine Label (if not already set) ---
     if label is None:
         if start_date_obj.date() == end_date_obj.date():
             label = f"Daily Report ({start_date_obj.strftime('%Y-%m-%d')})"
@@ -966,19 +1221,15 @@ def get_report_filters(query: str) -> Dict[str, Any]:
 
     return {"start_date": start_date_obj, "end_date": end_date_obj, "label": label}
 
-
-# --- FIX 6: fetch_filtered_leads to use local_session ---
 def fetch_filtered_leads(user_id: str, filters: Dict[str, Any]) -> List[Lead]:
-    local_session = Session()  # CRITICAL: Use local session
+    local_session = Session()
     try:
-        # NOTE: Reports use the team scope if the user is an active admin.
         _, _, is_active, is_admin, _ = get_agent_company_info(user_id)
         scope = 'team' if is_active and is_admin else 'personal'
         query = get_user_leads_query(user_id, scope=scope, local_session=local_session)
 
         keyword = filters.get('keyword')
         if keyword:
-            # Generic keyword search across multiple fields
             query = query.filter(or_(
                 Lead.name.ilike(f'%{keyword}%'),
                 Lead.phone.ilike(f'%{keyword}%'),
@@ -989,28 +1240,21 @@ def fetch_filtered_leads(user_id: str, filters: Dict[str, Any]) -> List[Lead]:
         search_field = filters.get('search_field')
         search_value = filters.get('search_value')
 
-        # Specific field search (used by /search [field] [value])
         if search_field == 'name' and search_value:
             query = query.filter(Lead.name.ilike(f'%{search_value}%'))
         elif search_field == 'phone' and search_value:
             query = query.filter(Lead.phone.ilike(f'%{search_value}%'))
         elif search_field == 'status' and search_value:
             query = query.filter(Lead.status.ilike(f'%{search_value}%'))
-        elif search_field == 'note' and search_value:
-             query = query.filter(Lead.note.ilike(f'%{search_value}%'))
 
-
-        # Date range filtering (used by /report [timeframe])
         start_date = filters.get('start_date')
         end_date = filters.get('end_date')
 
         if start_date:
-            # Convert localized Python datetime object to naive UTC datetime
             start_date_utc = start_date.astimezone(pytz.utc).replace(tzinfo=None)
             logging.info(f"🔍 Filtering leads >= {start_date_utc} (UTC)")
             query = query.filter(Lead.created_at >= start_date_utc)
         if end_date:
-            # Convert localized Python datetime object to naive UTC datetime
             end_date_utc = end_date.astimezone(pytz.utc).replace(tzinfo=None)
             logging.info(f"🔍 Filtering leads <= {end_date_utc} (UTC)")
             query = query.filter(Lead.created_at <= end_date_utc)
@@ -1025,17 +1269,14 @@ def create_report_dataframe(leads: List[Lead]) -> pd.DataFrame:
     """Creates a Pandas DataFrame for reports."""
     data = [{
         'ID': l.id,
-        # NOTE: Using hash of user_id for Agent ID column
         'Agent_ID_Hash': hash_user_id(l.user_id),
         'Name': l.name,
         'Phone': l.phone,
         'Status': l.status,
         'Source': l.source,
-        # Correct timezone conversion for report data
         'Followup Date (IST)': pytz.utc.localize(l.followup_date).astimezone(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S') if l.followup_date else 'N/A',
         'Followup Status': l.followup_status,
         'Notes': l.note,
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         'Created At': pytz.utc.localize(l.created_at).astimezone(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
     } for l in leads]
     return pd.DataFrame(data)
@@ -1044,14 +1285,11 @@ def create_report_excel(df: pd.DataFrame, label: str) -> BytesIO:
     """Generates an Excel file (XLSX) in memory."""
     output = BytesIO()
     try:
-        # Try xlsxwriter first
         writer = pd.ExcelWriter(output, engine='xlsxwriter')
     except ImportError:
-        # Fallback to openpyxl
         writer = pd.ExcelWriter(output, engine='openpyxl')
 
     df.to_excel(writer, sheet_name=label[:31], index=False)
-    # BUGFIX: Use .close() or .save() depending on engine. .close() is safer for pd.ExcelWriter.
     try:
         writer.close()
     except Exception as e:
@@ -1061,7 +1299,7 @@ def create_report_excel(df: pd.DataFrame, label: str) -> BytesIO:
     return output
 
 def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -> BytesIO:
-    """Generates a professional PDF report resembling an account statement."""
+    """Generates a professional PDF report."""
     if not HAS_REPORTLAB:
         output = BytesIO(b"%PDF-1.4\n%Reportlab Mock PDF\n")
         output.seek(0)
@@ -1070,7 +1308,6 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     buffer = BytesIO()
     styles = getSampleStyleSheet()
 
-    # Define PDF metadata and basic template properties
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
@@ -1081,26 +1318,19 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     )
     story = []
 
-    # 1. Fetch Dynamic Context (Company Info)
     company_name, _, _, _, agent_phone = get_agent_company_info(user_id)
     report_label = filters.get('label', 'Report')
 
-    # Format dates for header
-    # BUGFIX: Handle possible None in filters if parsing failed
     start_date_str = filters['start_date'].strftime('%Y-%m-%d') if filters.get('start_date') and isinstance(filters['start_date'], datetime) else 'Start of History'
     end_date_str = filters['end_date'].strftime('%Y-%m-%d') if filters.get('end_date') and isinstance(filters['end_date'], datetime) else datetime.now(TIMEZONE).strftime('%Y-%m-%d')
 
-    # 2. Header Content (Account Statement Style)
     header_data = [
-        # Row 0: Company Name | Report Title
         [Paragraph(f"<font size=16><b>{company_name}</b></font>", styles['Normal']),
          Paragraph(f"<font size=16 color='gray'><b>TriageAI {report_label}</b></font>", styles['Normal'])],
-        # Row 1: Contact | Period
         [f"Agent WA ID: {agent_phone}", f"Period: {start_date_str} to {end_date_str}"],
         ["", ""]
     ]
 
-    # Define Column Widths
     header_table_style = TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1114,51 +1344,42 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     story.append(header_table)
     story.append(Spacer(1, 0.1 * inch))
 
-    # 3. Data Table (Simplified for PDF layout)
     pdf_df = df[['ID', 'Name', 'Phone', 'Status', 'Followup Date (IST)', 'Notes', 'Created At']]
 
-    # Prepare data, handling possible None values and using Paragraph for Notes/long text
     data_list = [pdf_df.columns.values.tolist()]
 
-    # Define a style for the wrapped paragraph text inside the table
     wrap_style = styles['Normal']
     wrap_style.fontSize = 8
-    wrap_style.leading = 9 # line height
+    wrap_style.leading = 9
 
     for _, row in pdf_df.iterrows():
         data_row = row.tolist()
-        # Use Paragraph for the 'Notes' column (index 5) to enforce text wrapping
         note_content = str(data_row[5]) if data_row[5] else 'N/A'
         data_row[5] = Paragraph(note_content, wrap_style)
 
-        # Use Paragraph for Created At (index 6) to allow better wrapping
         created_at_content = str(data_row[6]) if data_row[6] else 'N/A'
         data_row[6] = Paragraph(created_at_content, wrap_style)
 
         data_list.append(data_row)
 
-    # Calculate column widths to fit the page (approx 7.5 inches available)
-    # ID: 0.5, Name: 1.25, Phone: 1.0, Status: 0.75, Followup Date: 1.5, Notes: 1.5, Created At: 1.0 (Total: 7.5)
     col_widths = [0.5 * inch, 1.25 * inch, 1.0 * inch, 0.75 * inch, 1.5 * inch, 1.5 * inch, 1.0 * inch]
 
-    data_table = Table(data_list, colWidths=col_widths, repeatRows=1) # Ensure header repeats on new pages
+    data_table = Table(data_list, colWidths=col_widths, repeatRows=1)
     data_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'), # Center Header Text
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'), # Align all content to top
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (0, 0), 0.5, colors.grey), # Add grid only for the first column header
-        ('GRID', (0, 1), (-1, -1), 0.5, colors.lightgrey), # Grid for data rows
+        ('GRID', (0, 0), (-1, 0), 0.5, colors.grey),
     ]))
 
     story.append(data_table)
 
-    # 4. Footer Setup (runs on every page)
     def pdf_footer(canvas, doc):
         now_ist = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S %Z')
         canvas.saveState()
@@ -1168,12 +1389,9 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
         canvas.restoreState()
 
     try:
-        # Build the document with the custom footer
         doc.build(story, onFirstPage=pdf_footer, onLaterPages=pdf_footer)
-
     except Exception as e:
         logging.error(f"Reportlab build failed: {e}")
-        # Reset buffer and return mock content if build fails
         buffer.seek(0)
         output = BytesIO(b"%PDF-1.4\n%Reportlab Build Failed Mock\n")
         output.seek(0)
@@ -1182,19 +1400,16 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
     buffer.seek(0)
     return buffer
 
-# --- FIX 1 & 2: format_pipeline_text uses local_session and correct logic ---
 def format_pipeline_text(user_id: str, scope: str = 'personal') -> str:
     """Formats the current lead status counts into a text pipeline view."""
     local_session = Session()
     try:
-        # Build query based on scope, using the local session
         if scope == 'personal':
             base_query = local_session.query(Lead).filter(Lead.user_id == user_id)
             title = "TriageAI Personal Pipeline View"
-        else:  # team scope
+        else:
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
             if is_active and is_admin and company_id:
-                # Use the helper which is now updated to accept local_session
                 base_query = get_user_leads_query(user_id, scope='team', local_session=local_session)
                 title = "TriageAI Company Pipeline View"
             else:
@@ -1222,20 +1437,18 @@ def format_pipeline_text(user_id: str, scope: str = 'personal') -> str:
 
 
 # ==============================
-# 7. WEB ENDPOINTS (FLASK) - FULLY IMPLEMENTED
+# 7. WEB ENDPOINTS (FLASK)
 # ==============================
 
 @APP.route('/')
 def pricing_page():
     """Renders the single-page pricing and signup HTML from a template."""
     WEBSITE_URL = "https://triageai.online/"
-    # Render the index.html template, passing required variables for JavaScript interpolation
     return render_template(
-        'index.html', 
-        web_auth_token=WEB_AUTH_TOKEN, 
+        'index.html',
+        web_auth_token=WEB_AUTH_TOKEN,
         website_url=WEBSITE_URL
     )
-
 
 @APP.route('/renew_link/<token>')
 def renew_link_handler(token: str):
@@ -1245,34 +1458,26 @@ def renew_link_handler(token: str):
 
     token_data = RENEWAL_TOKEN_STORE[token]
     phone = token_data['phone']
-    
-    # Check expiry
+
     if datetime.now(TIMEZONE) - token_data['timestamp'] > RENEWAL_TOKEN_TIMEOUT:
-        del RENEWAL_TOKEN_STORE[token] # Purge on expiry
+        del RENEWAL_TOKEN_STORE[token]
         return "<p>❌ Renewal Link Expired. Please request a new link via WhatsApp by sending /renew.</p>", 404
         
     local_session = Session()
     try:
-        # Fetch data needed for the personalized page
         agent = local_session.query(Agent).filter(Agent.user_id == phone).first()
         if not agent or not agent.is_admin or not agent.company_id:
-            # Token is valid but user is not an Admin/licensed user in DB
             return "<p>❌ Access Denied. Your account is not authorized for this renewal link. You must be the company administrator to renew.</p>", 403
             
         company = local_session.query(Company).get(agent.company_id)
         license = company.license
         
-        # --- License.plan_name contains the full label like "Individual (1 Agent) Annual (Discounted)" ---
-        
-        # Determine the base plan key based on the stored plan_name
         base_plan_key = 'individual'
         if '5-User Team' in license.plan_name:
              base_plan_key = '5user'
         elif '10-User Pro' in license.plan_name:
              base_plan_key = '10user'
-        # else it remains 'individual'
         
-        # BUGFIX: Properly construct plan keys for both monthly and annual
         if base_plan_key == 'individual':
             monthly_plan_key = 'individual'
             annual_plan_key = 'individual_annual'
@@ -1280,27 +1485,21 @@ def renew_link_handler(token: str):
             monthly_plan_key = f'{base_plan_key}_monthly'
             annual_plan_key = f'{base_plan_key}_annual'
         
-        # Look up the actual plan details from PLANS dict
         monthly_plan = PLANS.get(monthly_plan_key)
         annual_plan = PLANS.get(annual_plan_key)
         
-        # Safety check - if plans don't exist, use fallback
         if not monthly_plan or not annual_plan:
             logging.error(f"Plan keys not found: {monthly_plan_key}, {annual_plan_key}")
             return "<p>❌ Error: Invalid plan configuration. Please contact support.</p>", 500
         
-        # Use the prices from the PLANS structure
         price_monthly = monthly_plan['price']
         price_annual = annual_plan['price']
         
-        # Calculate display prices
         monthly_display_price = price_monthly
         annual_display_price_per_month = price_annual / 12 
         
         profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
 
-        # Construct data for the HTML template
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
 
         renewal_data = {
@@ -1309,14 +1508,13 @@ def renew_link_handler(token: str):
             'phone': phone,
             'plan_name': license.plan_name,
             'expired_at': expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A (Perpetual)',
-            'base_plan': base_plan_key, # e.g., 'individual', '5user', '10user'
+            'base_plan': base_plan_key,
             'price_monthly': monthly_display_price,
-            'price_annual': price_annual, # Annual total price
+            'price_annual': price_annual,
             'monthly_per_month_display': monthly_display_price,
             'annual_per_month_display': int(round(annual_display_price_per_month)),
         }
         
-        # Render the renewal.html template, passing the data dictionary
         return render_template(
             'renewal.html',
             renewal_data=renewal_data,
@@ -1331,27 +1529,24 @@ def renew_link_handler(token: str):
     finally:
         local_session.close()
 
-
 @APP.route('/api/renewal_purchase', methods=['POST'])
 def api_renewal_purchase():
-    """Handles mock payment success for license renewal -> License update."""
+    """Handles mock payment success for license renewal."""
     auth_header = request.headers.get('Authorization')
     if auth_header != f'Bearer {WEB_AUTH_TOKEN}':
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
-    
+
     token = data.get('token')
-    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual_annual'
+    plan_key = data.get('plan')
     phone = _sanitize_wa_id(data.get('phone', ''))
 
-    # 1. Validate Renewal Token
     if not token or token not in RENEWAL_TOKEN_STORE or RENEWAL_TOKEN_STORE[token]['phone'] != phone:
          return jsonify({"status": "error", "message": "Invalid or expired renewal session."}), 403
-    
+
     token_data = RENEWAL_TOKEN_STORE[token]
     if datetime.now(TIMEZONE) - token_data['timestamp'] > RENEWAL_TOKEN_TIMEOUT:
-        # Purge expired token
         if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
         return jsonify({"status": "error", "message": "Renewal session expired."}), 403
 
@@ -1364,7 +1559,6 @@ def api_renewal_purchase():
     new_expiry_date = None 
     plan_label = ""
     try:
-        # 2. Locate Admin/Company
         agent = web_session.query(Agent).filter(Agent.user_id == phone, Agent.is_admin == True).first()
         if not agent or not agent.company_id:
             return jsonify({"status": "error", "message": "User not a valid Admin."}), 403
@@ -1375,16 +1569,10 @@ def api_renewal_purchase():
         if not license:
             return jsonify({"status": "error", "message": "No license found for this company."}), 404
 
-        # 3. Update/Renew License
-        
-        # If renewing an expired license, start from now. If renewing an active one, extend from expiry.
-        # BUGFIX: Ensure license.expires_at is used as a naive UTC datetime
         start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
         new_expiry_date = start_from + plan_details['duration']
         
-        # === FIX: Build the proper plan_label with duration ===
         base_label = plan_details['label']
-        # Determine duration suffix based on plan_key
         if plan_key == 'individual_annual' or 'annual' in plan_key:
             duration_suffix = "Annual (Discounted)"
         elif plan_key == 'individual' or 'monthly' in plan_key:
@@ -1396,20 +1584,17 @@ def api_renewal_purchase():
         
         license.expires_at = new_expiry_date
         license.is_active = True
-        license.plan_name = plan_label # Use the constructed full plan label
+        license.plan_name = plan_label
         license.agent_limit = plan_details['agents'] 
         
         web_session.commit()
         
-        # 4. Send WhatsApp Renewal Message (Async)
         threading.Thread(
             target=_send_admin_renewal_message_sync,
             args=(phone, plan_label, new_expiry_date)
         ).start()
         
-        # 5. Cleanup renewal token
         if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
-
 
         return jsonify({"status": "success", "message": "Renewal successful. License updated."}), 200
 
@@ -1419,7 +1604,6 @@ def api_renewal_purchase():
         return jsonify({"status": "error", "message": "Internal server error."}), 500
     finally:
         web_session.close()
-
 
 @APP.route('/api/register', methods=['POST'])
 def api_register():
@@ -1432,7 +1616,6 @@ def api_register():
 
     web_session = Session()
     try:
-        # Create or update UserProfile
         profile = web_session.query(UserProfile).filter(UserProfile.phone == phone).first()
         if not profile:
             profile = UserProfile(
@@ -1449,16 +1632,14 @@ def api_register():
 
         web_session.commit()
 
-        # Generate and Mock Send OTP
         otp = generate_otp()
-        send_whatsapp_otp(phone, otp) # Sends the mock OTP
+        send_whatsapp_otp(phone, otp)
 
         return jsonify({"status": "success", "message": "OTP sent."}), 200
 
     except IntegrityError as e:
         web_session.rollback()
         logging.error(f"Registration Integrity Error: {e}")
-        # BUGFIX: Return better error for user if email unique constraint fails
         return jsonify({"status": "error", "message": "Email already registered."}), 409
     except Exception as e:
         web_session.rollback()
@@ -1467,18 +1648,16 @@ def api_register():
     finally:
         web_session.close()
 
-
 @APP.route('/api/verify_otp', methods=['POST'])
 def api_verify_otp():
     """Step 2: Verify OTP for the website flow."""
     data = request.json
     phone = _sanitize_wa_id(data.get('phone', ''))
     otp_input = data.get('otp', '')
-    
+
     if not phone or not otp_input:
         return jsonify({"status": "error", "message": "Missing phone or OTP"}), 400
 
-    # Check if state exists first to avoid KeyError if purged
     state = OTP_STORE.get(phone)
     if not state:
         return jsonify({"status": "error", "message": "OTP expired or too many attempts. Please request a new one."}), 401
@@ -1486,14 +1665,12 @@ def api_verify_otp():
     if verify_whatsapp_otp(phone, otp_input):
         return jsonify({"status": "success", "message": "OTP verified."}), 200
     else:
-        # Check if state was purged by failed verification
         state_after_check = OTP_STORE.get(phone)
         if not state_after_check:
              return jsonify({"status": "error", "message": "Too many failed attempts. Please restart signup."}), 401
              
         attempts_left = 5 - state_after_check.get('attempts', 0)
         return jsonify({"status": "error", "message": f"Invalid or expired OTP. Attempts left: {attempts_left}"}), 401
-
 
 @APP.route('/api/billing', methods=['POST'])
 def api_billing():
@@ -1504,7 +1681,6 @@ def api_billing():
     if not phone or not data.get('billing_address'):
         return jsonify({"status": "error", "message": "Missing required fields"}), 400
 
-    # Ensure OTP was verified previously
     state = OTP_STORE.get(phone)
     if not state or not state['is_verified']:
         return jsonify({"status": "error", "message": "Phone not verified via OTP. Please restart signup."}), 403
@@ -1515,11 +1691,9 @@ def api_billing():
         if not profile:
              return jsonify({"status": "error", "message": "Profile not found."}), 404
 
-        # BUGFIX: Ensure `city_country` is passed or default to empty string
         city_country = data.get('city_country', '')
         profile.billing_address = data['billing_address'] + ', ' + city_country
         profile.gst_number = data.get('gst_number', '')
-        # Mark profile as fully registered for the payment step
         profile.is_registered = True
         web_session.commit()
 
@@ -1532,7 +1706,6 @@ def api_billing():
     finally:
         web_session.close()
 
-
 @APP.route('/api/purchase', methods=['POST'])
 def api_purchase():
     """Step 4: Mock payment success -> License creation and activation."""
@@ -1541,7 +1714,7 @@ def api_purchase():
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     data = request.json
-    plan_key = data.get('plan') # This is the full key like '5user_monthly' or 'individual_annual'
+    plan_key = data.get('plan')
     phone = _sanitize_wa_id(data.get('phone', ''))
 
     plan_details = PLANS.get(plan_key)
@@ -1553,17 +1726,15 @@ def api_purchase():
     new_key = ""
     expiry_date = None
     plan_label = ""
-    
+
     try:
         profile = web_session.query(UserProfile).filter(UserProfile.phone == phone).first()
         if not profile or not profile.is_registered:
              return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
 
-        # --- 1. Construct the CORRECT final plan label and expiry ---
         expiry_date = datetime.utcnow() + plan_details['duration'] 
         
         base_label = plan_details['label']
-        # Determine duration suffix based on plan_key
         if plan_key == 'individual_annual' or 'annual' in plan_key:
             duration_suffix = "Annual (Discounted)"
         elif plan_key == 'individual' or 'monthly' in plan_key:
@@ -1573,41 +1744,30 @@ def api_purchase():
             
         plan_label = f"{base_label} {duration_suffix}".strip()
 
-        # --- 2. Check/Create Company and License ---
-        
-        # Check if user is already an agent
         existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
         
-        # Scenario 1: User is already an Admin of another company (Safety check)
         if existing_agent and existing_agent.is_admin:
              return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
         
-        # Scenario 2 & 3: Proceed to create new company
-        
-        new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]  # Generate license key
+        new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]
         
         company_name = profile.company_name if profile.company_name else "TriageAI Company"
         
-        # Check if we can reuse the existing company/license (for renewal logic)
         existing_company = web_session.query(Company).filter(Company.admin_user_id == phone).first()
         
         if existing_company:
-            # RENEWAL PATH (Only possible if the license is expired or near expiry)
             license = existing_company.license
             if license:
-                 # Extend expiration date (or set a new one)
-                 # BUGFIX: Use license.expires_at as a naive UTC datetime
                  start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
                  license.expires_at = start_from + plan_details['duration']
                  license.is_active = True
-                 license.plan_name = plan_label # Use the constructed full plan label
-                 license.key = new_key # Assign a new key on renewal for tracking/consistency
+                 license.plan_name = plan_label
+                 license.key = new_key
                  license.agent_limit = plan_details['agents'] 
                  
                  logging.info(f"✅ Purchase success (Renewal). License {license.key} extended for Admin {phone}.")
-                 new_key = license.key # Use the new key
+                 new_key = license.key
             else:
-                 # Should not happen in production if company exists, but create a new license
                  license = License(
                     company_id=existing_company.id,
                     key=new_key,
@@ -1617,13 +1777,12 @@ def api_purchase():
                     expires_at=expiry_date
                 )
                  web_session.add(license)
-                 existing_company.name = company_name # Update name just in case
+                 existing_company.name = company_name
         
         else:
-            # NEW PURCHASE PATH
             company = Company(admin_user_id=phone, name=company_name)
             web_session.add(company)
-            web_session.flush() # Get company.id
+            web_session.flush()
 
             license = License(
                 company_id=company.id,
@@ -1635,32 +1794,24 @@ def api_purchase():
             )
             web_session.add(license)
             
-            # --- 2. Update Agent (The Buyer) ---
             agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
             if not agent:
-                # BUGFIX: Create Agent if they don't exist (e.g., if they registered via web but never sent a WA message)
                 agent = Agent(user_id=phone)
                 web_session.add(agent)
 
             agent.company_id = company.id
             agent.is_admin = True
             
-            # CRITICAL: Ensure Admin is added to the agent count (which they are here)
-            
             logging.info(f"✅ Purchase success (New). License {new_key} activated for Admin {phone}.")
 
         web_session.commit()
-        # Clear OTP state after final purchase step
         if phone in OTP_STORE:
              del OTP_STORE[phone]
 
-
-        # --- 3. Send WhatsApp Welcome Message (Async) ---
         threading.Thread(
-            target=_send_admin_welcome_message_sync_fixed, # This uses the plan_label we just set
+            target=_send_admin_welcome_message_sync_fixed,
             args=(phone, plan_label, new_key, expiry_date) 
         ).start()
-
 
         return jsonify({"status": "success", "message": "Purchase successful. License activated."}), 200
 
@@ -1678,8 +1829,6 @@ def api_purchase():
 @APP.route('/api/update/<int:lead_id>', methods=['POST'])
 def web_update_duplicate_endpoint(lead_id: int):
     """Web endpoint to update duplicate leads."""
-    # This route is retained from the original plan for completeness, 
-    # though it needs a full authentication layer in a real frontend.
     auth_header = request.headers.get('Authorization')
     if auth_header != f'Bearer {WEB_AUTH_TOKEN}':
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
@@ -1700,9 +1849,7 @@ def web_update_duplicate_endpoint(lead_id: int):
         followup_dt_utc_naive = None
         if new_data.get("followup_date"):
             try:
-                # The AI returns IST datetime string. Convert back to UTC naive for DB storage.
                 dt_ist = datetime.strptime(new_data["followup_date"], '%Y-%m-%d %H:%M:%S')
-                # BUGFIX: Use pytz.utc.localize for robust conversion
                 followup_dt_utc_naive = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
             except ValueError:
                 pass
@@ -1716,7 +1863,6 @@ def web_update_duplicate_endpoint(lead_id: int):
         web_session.commit()
 
         if followup_dt_utc_naive:
-            # Re-schedule the followup job
             schedule_followup(lead.user_id, lead.id, lead.name, lead.phone, followup_dt_utc_naive)
 
         return jsonify({"status": "success", "message": f"TriageAI Lead {lead.id} updated."}), 200
@@ -1728,9 +1874,9 @@ def web_update_duplicate_endpoint(lead_id: int):
         web_session.close()
 
 
-# =========================================================================
-# 8. WHATSAPP WEBHOOK HANDLER & BOT LOGIC
-# =========================================================================
+# ==============================
+# 8. WHATSAPP WEBHOOK HANDLER
+# ==============================
 
 @APP.route('/webhook', methods=['GET', 'POST'])
 def whatsapp_webhook():
@@ -1746,16 +1892,13 @@ def whatsapp_webhook():
         data = request.get_json()
         logging.info("Received WhatsApp data.")
 
-        # Process the update in a separate thread to prevent webhook timeouts
         threading.Thread(target=process_whatsapp_update_sync, args=(data,)).start()
         return jsonify({"status": "received"}), 200
-
 
 def process_whatsapp_update_sync(data: Dict[str, Any]):
     """Synchronous function to process an incoming WhatsApp message within a thread."""
     sender_wa_id = None
     try:
-        # Check for message structure
         if not data.get('entry') or not data['entry'][0]['changes'][0]['value'].get('messages'):
             return
 
@@ -1763,15 +1906,20 @@ def process_whatsapp_update_sync(data: Dict[str, Any]):
         sender_wa_id = message_data['from']
         message_type = message_data.get('type')
 
-        _register_agent_sync(sender_wa_id) # Ensure user is registered before processing
+        _register_agent_sync(sender_wa_id)
 
         # Handle Interactive Messages (Reply Buttons)
-        if message_type == 'interactive' and 'button_reply' in message_data['interactive']:
-            button_id = message_data['interactive']['button_reply']['id']
-            # All our button IDs start with CMD_
-            if button_id.startswith('CMD_'):
-                # Send the CMD_... ID directly to the command handler
-                _handle_command_message(sender_wa_id, button_id)
+        if message_type == 'interactive':
+            interactive_data = message_data.get('interactive', {})
+            
+            if 'button_reply' in interactive_data:
+                button_id = interactive_data['button_reply']['id']
+                handle_button_callback(sender_wa_id, button_id)
+                return
+            
+            elif 'list_reply' in interactive_data:
+                list_id = interactive_data['list_reply']['id']
+                handle_button_callback(sender_wa_id, list_id)
                 return
 
         if message_type != 'text':
@@ -1784,14 +1932,18 @@ def process_whatsapp_update_sync(data: Dict[str, Any]):
             _handle_command_message(sender_wa_id, message_body)
             return
         
-        # Check if the message is only a 6-digit number (potential OTP reply from an agent)
         is_otp_reply = re.fullmatch(r'\d{6}', message_body.strip())
         
         if is_otp_reply:
-             # Check if there is a pending OTP state for this user (Agent Onboarding)
              if OTP_STORE.get(sender_wa_id) and OTP_STORE[sender_wa_id].get('admin_id'):
                   _cmd_verify_agent_otp_sync(sender_wa_id, message_body.strip())
                   return
+
+        # Check if user is waiting for input based on state
+        user_state = USER_STATE.get(sender_wa_id, {})
+        if user_state.get('waiting_for'):
+            _handle_user_input(sender_wa_id, message_body, user_state)
+            return
 
         # Default action: process as a new lead
         _process_incoming_lead_sync(sender_wa_id, message_body)
@@ -1801,509 +1953,286 @@ def process_whatsapp_update_sync(data: Dict[str, Any]):
         if sender_wa_id:
             send_whatsapp_message(sender_wa_id, "❌ Sorry, an internal error occurred while processing your message.")
 
+def handle_button_callback(user_id: str, button_id: str):
+    """Routes button callbacks to appropriate handlers."""
+    # Remove CMD prefix if present
+    button_id = button_id.replace('CMD_', '')
+
+    logging.info(f"Button pressed: {button_id} by user {user_id}")
+
+    # Main Menu
+    if button_id == 'START':
+        show_main_menu(user_id)
+
+    # Leads Menu
+    elif button_id == 'LEADS_MENU':
+        show_leads_menu(user_id)
+    elif button_id == 'ADD_LEAD_SUBMENU':
+        show_add_lead_submenu(user_id)
+    elif button_id == 'PIPELINE_SUBMENU':
+        show_pipeline_submenu(user_id)
+    elif button_id == 'FOLLOWUPS_SUBMENU':
+        show_followups_submenu(user_id)
+    elif button_id == 'SEARCH_SUBMENU':
+        show_search_submenu(user_id)
+
+    # Add Lead Actions
+    elif button_id == 'LEAD_MANUAL':
+        USER_STATE[user_id] = {'waiting_for': 'lead_details'}
+        send_whatsapp_message(user_id, "📝 Please send the lead details now.\nFormat: Name, Phone, Status, Notes")
+    elif button_id == 'LEAD_AI':
+        USER_STATE[user_id] = {'waiting_for': 'lead_ai'}
+        send_whatsapp_message(user_id, "🤖 Please paste your conversation or lead message:")
+
+    # Pipeline Actions
+    elif button_id == 'PIPELINE_PERSONAL':
+        _pipeline_view_cmd_sync(user_id, scope='personal')
+    elif button_id == 'PIPELINE_TEAM':
+        _pipeline_view_cmd_sync(user_id, scope='team')
+    elif button_id == 'LIST_NEW':
+        _search_by_status(user_id, 'New')
+    elif button_id == 'LIST_HOT':
+        _search_by_status(user_id, 'Hot')
+    elif button_id == 'LIST_FOLLOWUP':
+        _search_by_status(user_id, 'Follow-Up')
+    elif button_id == 'LIST_CONVERTED':
+        _search_by_status(user_id, 'Converted')
+
+    # Follow-up Actions
+    elif button_id == 'FU_TODAY':
+        _show_today_followups(user_id)
+    elif button_id == 'FU_PENDING':
+        _next_followups_cmd_sync(user_id, scope='personal')
+    elif button_id == 'FU_MISSED':
+        _show_missed_followups(user_id)
+    elif button_id == 'FU_DONE_LIST':
+        _show_completed_followups(user_id)
+
+    # Search Actions
+    elif button_id == 'SEARCH_NAME':
+        USER_STATE[user_id] = {'waiting_for': 'search_name'}
+        send_whatsapp_message(user_id, "👤 Enter the name to search:")
+    elif button_id == 'SEARCH_PHONE':
+        USER_STATE[user_id] = {'waiting_for': 'search_phone'}
+        send_whatsapp_message(user_id, "📞 Enter the phone number to search:")
+    elif button_id == 'SEARCH_STATUS_MENU':
+        show_search_status_menu(user_id)
+    elif button_id == 'SEARCH_NOTES':
+        USER_STATE[user_id] = {'waiting_for': 'search_notes'}
+        send_whatsapp_message(user_id, "📝 Enter keywords to search in notes:")
+    elif button_id == 'SEARCH_STATUS_NEW':
+        _search_by_status(user_id, 'New')
+    elif button_id == 'SEARCH_STATUS_HOT':
+        _search_by_status(user_id, 'Hot')
+    elif button_id == 'SEARCH_STATUS_FOLLOWUP':
+        _search_by_status(user_id, 'Follow-Up')
+    elif button_id == 'SEARCH_STATUS_CONVERTED':
+        _search_by_status(user_id, 'Converted')
+
+    # Reports Menu
+    elif button_id == 'REPORTS_MENU':
+        show_reports_menu(user_id)
+    elif button_id == 'REPORT_PERIOD_MENU':
+        show_report_period_menu(user_id)
+    elif button_id == 'REPORT_DOWNLOAD_MENU':
+        show_report_download_menu(user_id)
+    elif button_id == 'REPORT_TODAY':
+        _report_cmd_sync_with_arg(user_id, 'today')
+    elif button_id == 'REPORT_WEEK':
+        _report_cmd_sync_with_arg(user_id, 'this week')
+    elif button_id == 'REPORT_MONTH':
+        _report_cmd_sync_with_arg(user_id, 'this month')
+    elif button_id == 'REPORT_LAST_MONTH':
+        _report_cmd_sync_with_arg(user_id, 'last month')
+    elif button_id == 'DOWNLOAD_TEXT':
+        USER_STATE[user_id] = {'waiting_for': 'report_text_period'}
+        send_whatsapp_message(user_id, "📅 Which period? (e.g., 'today', 'this week', 'this month')")
+    elif button_id == 'DOWNLOAD_XLSX':
+        USER_STATE[user_id] = {'waiting_for': 'report_xlsx_period'}
+        send_whatsapp_message(user_id, "📅 Which period? (e.g., 'today', 'this week', 'this month')")
+    elif button_id == 'DOWNLOAD_PDF':
+        USER_STATE[user_id] = {'waiting_for': 'report_pdf_period'}
+        send_whatsapp_message(user_id, "📅 Which period? (e.g., 'today', 'this week', 'this month')")
+
+    # Settings Menu
+    elif button_id == 'SETTINGS_MENU':
+        show_settings_menu(user_id)
+    elif button_id == 'NOTIFICATIONS_MENU':
+        show_notifications_menu(user_id)
+    elif button_id == 'SUMMARY_ON':
+        _daily_summary_control_sync(user_id, 'on')
+        show_notifications_menu(user_id)
+    elif button_id == 'SUMMARY_OFF':
+        _daily_summary_control_sync(user_id, 'off')
+        show_notifications_menu(user_id)
+    elif button_id == 'VIEW_PROFILE':
+        _cmd_view_profile(user_id)
+    elif button_id == 'LICENSE_INFO':
+        _cmd_license_setup_sync(user_id)
+    elif button_id == 'HELP':
+        _cmd_help_sync(user_id)
+
+    # Team Menu
+    elif button_id == 'TEAM_MENU':
+        show_team_menu(user_id)
+    elif button_id == 'MANAGE_MEMBERS_MENU':
+        show_manage_members_menu(user_id)
+    elif button_id == 'TEAM_FOLLOWUPS':
+        _team_followups_cmd_sync(user_id)
+    elif button_id == 'ADD_AGENT':
+        USER_STATE[user_id] = {'waiting_for': 'add_agent_phone'}
+        send_whatsapp_message(user_id, "📞 Enter the WhatsApp phone number of the new agent (e.g., 919876543210):")
+    elif button_id == 'LIST_AGENTS':
+        _cmd_list_agents(user_id)
+    elif button_id == 'REMAINING_SLOTS':
+        _cmd_remaining_slots_sync(user_id)
+    elif button_id == 'REMOVE_AGENT_PROMPT':
+        USER_STATE[user_id] = {'waiting_for': 'remove_agent_phone'}
+        send_whatsapp_message(user_id, "📞 Enter the WhatsApp phone number of the agent to remove:")
+    elif button_id == 'TEAM_REPORT_MENU':
+        show_reports_menu(user_id)  # Reuse reports menu for team
+
+    else:
+        send_whatsapp_message(user_id, "❌ Unknown button action. Please try again.")
+
+def _handle_user_input(user_id: str, message: str, user_state: dict):
+    """Handles user input based on current state."""
+    waiting_for = user_state.get('waiting_for')
+
+    if waiting_for == 'lead_details' or waiting_for == 'lead_ai':
+        _process_incoming_lead_sync(user_id, message)
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'search_name':
+        _search_cmd_sync(user_id, f"name {message}", scope='personal')
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'search_phone':
+        _search_cmd_sync(user_id, f"phone {message}", scope='personal')
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'search_notes':
+        _search_cmd_sync(user_id, message, scope='personal')
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'report_text_period':
+        _report_file_cmd_sync(user_id, 'text', f"/reporttext {message}")
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'report_xlsx_period':
+        _report_file_cmd_sync(user_id, 'excel', f"/reportexcel {message}")
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'report_pdf_period':
+        _report_file_cmd_sync(user_id, 'pdf', f"/reportpdf {message}")
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'add_agent_phone':
+        _cmd_add_agent_sync(user_id, message)
+        del USER_STATE[user_id]
+
+    elif waiting_for == 'remove_agent_phone':
+        _cmd_remove_agent_sync(user_id, message)
+        del USER_STATE[user_id]
+
+    else:
+        del USER_STATE[user_id]
+        send_whatsapp_message(user_id, "Session expired. Please use the menu to continue.")
 
 def _handle_command_message(sender_wa_id: str, message_body: str):
-    """
-    Helper function to parse and route commands.
-    Handles both /command [arg] format and CMD_BUTTON_ID format.
-    """
-    is_button_command = message_body.startswith('CMD_')
-    
-    if is_button_command:
-        # Button command (e.g., CMD_PIPELINE)
-        command = message_body
-        arg = ""
-        logging.info(f"Received button command: {command}")
-        
-    else:
-        # Text command (e.g., /status 100 Hot)
-        parts = message_body.split(maxsplit=1)
-        command = parts[0].lower()
-        arg = parts[1] if len(parts) > 1 else ""
-        logging.info(f"Received text command: {command} with arg: {arg}")
-        
-        # Standardize command to remove space for parsing consistency (e.g., /my leads -> /myleads)
-        if command in ['/my', '/add', '/set', '/followup', '/save']:
-            if len(parts) > 1:
-                sub_command_parts = arg.split(maxsplit=1)
-                sub_command = sub_command_parts[0].lower()
-                
-                if command == '/my' and sub_command in ['leads', 'followups']:
-                     command = f'/my{sub_command}'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/add' and sub_command == 'note':
-                     command = '/addnote'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/set' and sub_command in ['followup']:
-                     command = '/setfollowup'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                # Handle /followupdone/cancel/reschedule/setfollowup as specific tags
-                elif command == '/followup' and sub_command in ['done', 'cancel', 'reschedule']:
-                     command = f'/followup{sub_command}'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
-                elif command == '/save' and sub_command == 'lead':
-                     command = '/savelead'
-                     arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+    """Helper function to parse and route commands."""
+    parts = message_body.split(maxsplit=1)
+    command = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
 
+    if command in ['/my', '/add', '/set', '/followup', '/save']:
+        if len(parts) > 1:
+            sub_command_parts = arg.split(maxsplit=1)
+            sub_command = sub_command_parts[0].lower()
+            
+            if command == '/my' and sub_command in ['leads', 'followups']:
+                 command = f'/my{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/add' and sub_command == 'note':
+                 command = '/addnote'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/set' and sub_command in ['followup']:
+                 command = '/setfollowup'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/followup' and sub_command in ['done', 'cancel', 'reschedule']:
+                 command = f'/followup{sub_command}'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
+            elif command == '/save' and sub_command == 'lead':
+                 command = '/savelead'
+                 arg = sub_command_parts[1] if len(sub_command_parts) > 1 else ""
 
     local_session = Session()
     try:
-        # --- COMMAND ROUTING (Text Commands) ---
-        if not is_button_command:
-            # Commands available to all (license info, help, registration commands)
-            if command == '/start':
-                _cmd_start_sync(sender_wa_id)
-            elif command == '/licensesetup' or command == '/licenseinfo':
-                _cmd_license_setup_sync(sender_wa_id)
-            elif command == '/activate':
-                _cmd_activate_sync(sender_wa_id, arg)
-            elif command == '/renew':
-                _cmd_renew_sync(sender_wa_id)
-            elif command == '/help':
-                _cmd_help_sync(sender_wa_id)
-            elif command == '/debugjobs':
-                _cmd_debug_jobs_sync(sender_wa_id)
-            # Core/Admin Commands (Text)
-            elif command == '/myfollowups':
-                _next_followups_cmd_sync(sender_wa_id, scope='personal')
-            elif command == '/myleads': 
-                _search_cmd_sync(sender_wa_id, arg, scope='personal') 
-            elif command == '/dailysummary':
-                _daily_summary_control_sync(sender_wa_id, arg)
-            elif command == '/pipeline':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='personal') # Default to personal pipeline
-            elif command == '/setcompanyname':
-                _cmd_set_company_name_sync(sender_wa_id, arg)
-            elif command == '/addagent':
-                _cmd_add_agent_sync(sender_wa_id, arg)
-            elif command == '/removeagent':
-                _cmd_remove_agent_sync(sender_wa_id, arg)
-            elif command == '/remainingslots':
-                _cmd_remaining_slots_sync(sender_wa_id)
-            elif command == '/teamleads':
-                _search_cmd_sync(sender_wa_id, arg, scope='team')
-            elif command == '/teamfollowups':
-                _next_followups_cmd_sync(sender_wa_id, scope='team')
-            elif command == '/search':
-                _search_cmd_sync(sender_wa_id, arg, scope='team')
-            elif command.startswith('/report'):
-                if command == '/report':
-                    if not arg:
-                        _report_follow_up_prompt(sender_wa_id)
-                    else:
-                        _report_cmd_sync_with_arg(sender_wa_id, arg)
+        if command == '/start':
+            show_main_menu(sender_wa_id)
+        elif command == '/licensesetup' or command == '/licenseinfo':
+            _cmd_license_setup_sync(sender_wa_id)
+        elif command == '/activate':
+            _cmd_activate_sync(sender_wa_id, arg)
+        elif command == '/renew':
+            _cmd_renew_sync(sender_wa_id)
+        elif command == '/help':
+            _cmd_help_sync(sender_wa_id)
+        elif command == '/debugjobs':
+            _cmd_debug_jobs_sync(sender_wa_id)
+        elif command == '/myfollowups':
+            _next_followups_cmd_sync(sender_wa_id, scope='personal')
+        elif command == '/myleads': 
+            _search_cmd_sync(sender_wa_id, arg, scope='personal') 
+        elif command == '/dailysummary':
+            _daily_summary_control_sync(sender_wa_id, arg)
+        elif command == '/pipeline':
+            _pipeline_view_cmd_sync(sender_wa_id, scope='personal')
+        elif command == '/setcompanyname':
+            _cmd_set_company_name_sync(sender_wa_id, arg)
+        elif command == '/addagent':
+            _cmd_add_agent_sync(sender_wa_id, arg)
+        elif command == '/removeagent':
+            _cmd_remove_agent_sync(sender_wa_id, arg)
+        elif command == '/remainingslots':
+            _cmd_remaining_slots_sync(sender_wa_id)
+        elif command == '/teamleads':
+            _search_cmd_sync(sender_wa_id, arg, scope='team')
+        elif command == '/teamfollowups':
+            _team_followups_cmd_sync(sender_wa_id)
+        elif command == '/search':
+            _search_cmd_sync(sender_wa_id, arg, scope='team')
+        elif command.startswith('/report'):
+            if command == '/report':
+                if not arg:
+                    _report_follow_up_prompt(sender_wa_id)
                 else:
-                     # Command like /reporttext [timeframe]
-                     file_type = command.replace('/report', '')
-                     if file_type.startswith('text'): file_type = 'text'
-                     elif file_type.startswith('excel'): file_type = 'excel'
-                     elif file_type.startswith('pdf'): file_type = 'pdf'
-                     # The arg passed to the handler is the date range
-                     _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}") 
-            elif command == '/status':
-                _status_update_cmd_sync(sender_wa_id, arg)
-            elif command in ['/setfollowup', '/followupdone', '/followupcancel', '/followupreschedule']:
-                _handle_followup_cmd_sync(sender_wa_id, message_body)
-            elif command == '/addnote':
-                _cmd_add_note_sync(sender_wa_id, arg)
-            elif command == '/savelead' or command == '/lead':
-                _process_incoming_lead_sync(sender_wa_id, arg)
-            elif command == '/register':
-                send_whatsapp_message(sender_wa_id, f"🔗 To register and purchase a new license, please visit our secure portal: 🌐 https://triageai.online/")
+                    _report_cmd_sync_with_arg(sender_wa_id, arg)
             else:
-                send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` for a list of tags.")
-                
-        # --- COMMAND ROUTING (Button Commands) ---
+                 file_type = command.replace('/report', '')
+                 if file_type.startswith('text'): file_type = 'text'
+                 elif file_type.startswith('excel'): file_type = 'excel'
+                 elif file_type.startswith('pdf'): file_type = 'pdf'
+                 _report_file_cmd_sync(sender_wa_id, file_type, f"{command} {arg}")
+        elif command == '/status':
+            _status_update_cmd_sync(sender_wa_id, arg)
+        elif command in ['/setfollowup', '/followupdone', '/followupcancel', '/followupreschedule']:
+            _handle_followup_cmd_sync(sender_wa_id, message_body)
+        elif command == '/addnote':
+            _cmd_add_note_sync(sender_wa_id, arg)
+        elif command == '/savelead': 
+            _process_incoming_lead_sync(sender_wa_id, arg)
+        elif command == '/register':
+            send_whatsapp_message(sender_wa_id, f"🔗 To register and purchase a new license, please visit our secure portal: 🌐 https://triageai.online/")
         else:
-            if command == 'CMD_ADD_LEAD':
-                _cmd_add_lead_menu(sender_wa_id)
-            elif command == 'CMD_PIPELINE':
-                _cmd_pipeline_menu(sender_wa_id)
-            elif command == 'CMD_FOLLOWUPS':
-                _cmd_followups_menu(sender_wa_id)
-            elif command == 'CMD_REPORTS':
-                _cmd_reports_menu(sender_wa_id)
-            elif command == 'CMD_SEARCH':
-                _cmd_search_menu(sender_wa_id)
-            elif command == 'CMD_SETTINGS':
-                _cmd_settings_menu(sender_wa_id)
-                
-            # Admin Buttons from Main Menu
-            elif command == 'CMD_TEAM_PIPELINE':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='team')
-            elif command == 'CMD_TEAM_REPORT':
-                _cmd_reports_menu(sender_wa_id, scope='team')
-            elif command == 'CMD_ADD_AGENT':
-                _cmd_add_agent_menu(sender_wa_id)
-                
-            # --- Sub-Menu Implementations ---
-            
-            # 2.1 ADD LEAD
-            elif command == 'CMD_LEAD_QUICK':
-                 send_whatsapp_message(sender_wa_id, "📝 *Quick Add:* Reply with *only the Lead ID and Status* to update the last saved lead (e.g., `100 Hot`).")
-            elif command == 'CMD_LEAD_AI':
-                 send_whatsapp_message(sender_wa_id, "🤖 *AI Add:* Paste the full chat message (name, phone, status, notes, followup time) and send it as a single message.")
-            elif command == 'CMD_LEAD_MINIMAL':
-                 send_whatsapp_message(sender_wa_id, "📞 *Minimal Add:* Reply with *only the lead's Name and Phone Number* (e.g., `Rahul 919876543210`). Status defaults to 'New'.")
-
-            # 2.2 PIPELINE VIEW
-            elif command == 'CMD_PIPELINE_PERSONAL':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='personal')
-            elif command == 'CMD_PIPELINE_TEAM':
-                _pipeline_view_cmd_sync(sender_wa_id, scope='team')
-            elif command == 'CMD_LIST_NEW':
-                 _search_cmd_sync(sender_wa_id, "status New", scope='personal')
-            elif command == 'CMD_LIST_HOT':
-                 _search_cmd_sync(sender_wa_id, "status Hot", scope='personal')
-            elif command == 'CMD_LIST_FOLLOWUP':
-                 _search_cmd_sync(sender_wa_id, "status Follow-Up", scope='personal')
-            elif command == 'CMD_LIST_CONVERTED':
-                 _search_cmd_sync(sender_wa_id, "status Converted", scope='personal')
-
-            # 2.3 FOLLOW-UPS
-            elif command == 'CMD_FU_TODAY':
-                 send_whatsapp_message(sender_wa_id, "❌ Follow-up listing by today is not supported yet. Use `/myfollowups` to see next 5 pending.")
-            elif command == 'CMD_FU_PENDING':
-                _next_followups_cmd_sync(sender_wa_id, scope='personal')
-            elif command == 'CMD_FU_MISSED':
-                 _search_cmd_sync(sender_wa_id, "followup_status Missed", scope='personal')
-            elif command == 'CMD_FU_DONE':
-                 send_whatsapp_message(sender_wa_id, "✅ *Mark Done:* Reply with `/followupdone [Lead ID]` to confirm a completed follow-up.")
-            elif command == 'CMD_FU_RESCHEDULE':
-                 send_whatsapp_message(sender_wa_id, "♻️ *Reschedule:* Reply with `/followupreschedule [Lead ID] [New Date/Time]` (e.g., `100 tomorrow 11am`).")
-                
-            # 2.4 REPORTS (Text/File Generation)
-            elif command == 'CMD_REPORT_TODAY':
-                _report_cmd_sync_with_arg(sender_wa_id, "today")
-            elif command == 'CMD_REPORT_WEEK':
-                _report_cmd_sync_with_arg(sender_wa_id, "this week")
-            elif command == 'CMD_REPORT_MONTH':
-                _report_cmd_sync_with_arg(sender_wa_id, "this month")
-            elif command == 'CMD_REPORT_CUSTOM':
-                _report_follow_up_prompt(sender_wa_id)
-            elif command == 'CMD_REPORT_XLSX':
-                 # XLSX button at top level defaults to current month
-                _report_file_cmd_sync(sender_wa_id, 'excel', "/reportexcel this month")
-            elif command == 'CMD_REPORT_PDF':
-                 # PDF button at top level defaults to current month
-                _report_file_cmd_sync(sender_wa_id, 'pdf', "/reportpdf this month")
-                
-            # 2.5 SEARCH
-            elif command == 'CMD_SEARCH_NAME':
-                send_whatsapp_message(sender_wa_id, "🔍 *Search Name:* Reply with `/search name [Partial Name]` (e.g., `/search name Rahul`).")
-            elif command == 'CMD_SEARCH_PHONE':
-                send_whatsapp_message(sender_wa_id, "📞 *Search Phone:* Reply with `/search phone [Full or Partial Phone]` (e.g., `/search phone 98765`).")
-            elif command == 'CMD_SEARCH_STATUS':
-                send_whatsapp_message(sender_wa_id, "🎯 *Search Status:* Reply with `/search status [Status]` (e.g., `/search status Hot`).")
-            elif command == 'CMD_SEARCH_NOTES':
-                send_whatsapp_message(sender_wa_id, "📝 *Search Notes:* Reply with `/search note [Keyword]` (e.g., `/search note interested in product X`).")
-            elif command == 'CMD_CLEAR_SEARCH':
-                 send_whatsapp_message(sender_wa_id, "🔍 *Clear Search:* To see all your leads again, send `/myleads`.")
-
-            # 2.6 SETTINGS
-            elif command == 'CMD_SUMMARY_ON':
-                _daily_summary_control_sync(sender_wa_id, "on")
-            elif command == 'CMD_SUMMARY_OFF':
-                _daily_summary_control_sync(sender_wa_id, "off")
-            elif command == 'CMD_VIEW_PROFILE':
-                 _cmd_license_setup_sync(sender_wa_id) # Use the existing license info command as profile view
-            elif command == 'CMD_HELP':
-                _cmd_help_sync(sender_wa_id)
-            elif command == 'CMD_RENEW':
-                _cmd_renew_sync(sender_wa_id)
-            elif command == 'CMD_LIST_AGENTS':
-                 _cmd_list_agents_sync(sender_wa_id)
-            elif command == 'CMD_REMOVE_AGENT':
-                send_whatsapp_message(sender_wa_id, "🚫 *Remove Agent:* Reply with `/removeagent [WA Phone No.]` (e.g., `919876543210`).")
-            elif command == 'CMD_AGENT_INVITE':
-                send_whatsapp_message(sender_wa_id, "➕ *Add Member:* Reply with `/addagent [WA Phone No.]` (e.g., `919876543210`). The member must have messaged the bot at least once.")
-            
-            # Missing lead/followup contextual buttons are not implemented here as they require Lead ID context not available via main menus.
-
-
-    finally:
-        # Commands that modify the DB will commit inside their function.
-        local_session.close()
-
-
-# =========================================================================
-# WHATSAPP HANDLER IMPLEMENTATIONS (SYNC) - ADDING NEW MENU/BUTTON COMMANDS
-# =========================================================================
-
-def _cmd_list_agents_sync(user_id: str):
-    """Admin feature: List all agents in the company."""
-    if not _check_admin_permissions(user_id, "/listagents"):
-        return
-
-    local_session = Session()
-    try:
-        _, company_id, _, _, _ = get_agent_company_info(user_id)
-        
-        company = local_session.query(Company).get(company_id)
-        agents = local_session.query(Agent).filter(Agent.company_id == company_id).all()
-        
-        if not agents:
-            send_whatsapp_message(user_id, f"❌ No agents found for *{company.name}*.")
-            return
-
-        message = f"👥 *Agents for {company.name}* ({len(agents)} Total)\n\n"
-        
-        for agent in agents:
-            status = "👑 Admin" if agent.is_admin else "✅ Active Agent"
-            message += f"• `{agent.user_id}` ({status})\n"
-            
-        send_whatsapp_message(user_id, message)
+            send_whatsapp_message(sender_wa_id, "❌ Unknown TriageAI command. Send `/help` or `/start` for the menu.")
     finally:
         local_session.close()
 
-def _cmd_add_lead_menu(user_id: str):
-    """Generates the Add Lead menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to add leads. Send `/renew` or `/licensesetup`.")
-        return
-        
-    buttons = [
-        {"text": "📝 Quick Add", "command": "CMD_LEAD_QUICK"},
-        {"text": "🤖 AI Add (Message)", "command": "CMD_LEAD_AI"},
-        {"text": "📞 Minimal Add", "command": "CMD_LEAD_MINIMAL"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "How do you want to add the lead?\n\n*📝 Quick Add* updates the last lead. *🤖 AI Add* is for pasting chat transcripts. *📞 Minimal Add* requires just name/phone.",
-        buttons=buttons
-    )
 
-def _cmd_pipeline_menu(user_id: str):
-    """Generates the Pipeline menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
-        return
-        
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    # Send the personal pipeline view first
-    pipeline_text = format_pipeline_text(user_id, scope='personal')
-    
-    buttons = [
-        {"text": "👤 My Pipeline", "command": "CMD_PIPELINE_PERSONAL"},
-        {"text": "🟢 New Leads", "command": "CMD_LIST_NEW"},
-        {"text": "🔥 Hot Leads", "command": "CMD_LIST_HOT"},
-    ]
-    
-    if is_admin and is_active:
-         buttons.append({"text": "🏢 Team Pipeline", "command": "CMD_PIPELINE_TEAM"})
-
-    send_whatsapp_message(
-        user_id,
-        f"{pipeline_text}\n\n*Choose a view to see the leads in that stage:*",
-        buttons=buttons
-    )
-
-def _cmd_followups_menu(user_id: str):
-    """Generates the Follow-ups menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for follow-ups. Send `/renew` or `/licensesetup`.")
-        return
-
-    buttons = [
-        {"text": "⏳ Pending Follow-ups", "command": "CMD_FU_PENDING"},
-        {"text": "⚠️ Missed Follow-ups", "command": "CMD_FU_MISSED"},
-        {"text": "✔️ Mark as Done", "command": "CMD_FU_DONE"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "Choose follow-up action:",
-        buttons=buttons
-    )
-
-def _cmd_reports_menu(user_id: str, scope: str = 'personal'):
-    """Generates the Reports menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
-        return
-
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    buttons = [
-        {"text": "📅 Today's Report", "command": "CMD_REPORT_TODAY"},
-        {"text": "🗓️ This Week", "command": "CMD_REPORT_WEEK"},
-        {"text": "📆 This Month", "command": "CMD_REPORT_MONTH"},
-    ]
-    
-    # Add file download options as the next 3 buttons (limit is 3 in one message)
-    # The user is expected to choose a date range first, then file type (handled in the next step/reply).
-    # Since we need to show file types, we'll put the custom range prompt in a separate message.
-    
-    # If this is the secondary Team Report menu, adjust the message
-    if scope == 'team' and is_admin and is_active:
-         message_body = "👑 *Team Report Generation: Step 1 (Timeframe)*\n\nChoose the time frame to generate a team report."
-    else:
-         message_body = "📁 *Report Generation: Step 1 (Timeframe)*\n\nChoose the time frame for your personal report."
-
-    send_whatsapp_message(
-        user_id,
-        message_body,
-        buttons=buttons
-    )
-
-    # Follow up with a second message for the advanced options
-    advanced_buttons = [
-        {"text": "📊 Excel Download", "command": "CMD_REPORT_XLSX"},
-        {"text": "📘 PDF Download", "command": "CMD_REPORT_PDF"},
-        {"text": "📝 Custom Range", "command": "CMD_REPORT_CUSTOM"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "*Or choose a file format/custom period:* (Downloads default to this month's data)",
-        buttons=advanced_buttons
-    )
-
-
-def _cmd_search_menu(user_id: str):
-    """Generates the Search menu with buttons."""
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send `/renew` or `/licensesetup`.")
-        return
-        
-    buttons = [
-        {"text": "🔍 Search Name", "command": "CMD_SEARCH_NAME"},
-        {"text": "📞 Search Phone", "command": "CMD_SEARCH_PHONE"},
-        {"text": "🎯 Search Status", "command": "CMD_SEARCH_STATUS"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "What do you want to search? (A text command reply is expected for the next step.)",
-        buttons=buttons
-    )
-    
-    # Follow up with the rest of the options in a second message
-    advanced_search_buttons = [
-         {"text": "📝 Search Notes", "command": "CMD_SEARCH_NOTES"},
-         {"text": "🧹 Clear Search", "command": "CMD_CLEAR_SEARCH"},
-         {"text": "🔙 Main Menu", "command": "CMD_START"}
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "*More options:* (Search is team-wide if you are an admin)",
-        buttons=advanced_search_buttons
-    )
-
-
-def _cmd_settings_menu(user_id: str):
-    """Generates the Settings menu with buttons."""
-    
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    buttons = [
-        {"text": "🔔 Daily Summary ON", "command": "CMD_SUMMARY_ON"},
-        {"text": "🔕 Daily Summary OFF", "command": "CMD_SUMMARY_OFF"},
-        {"text": "📄 My Profile/License", "command": "CMD_VIEW_PROFILE"},
-    ]
-    
-    # Add Admin/Renewal options if applicable
-    if is_admin:
-         buttons.append({"text": "➕ Add Team Member", "command": "CMD_ADD_AGENT"})
-    
-    if is_admin or not company_id: # Admin or individual (can buy)
-         buttons.append({"text": "🔄 Renew/Purchase License", "command": "CMD_RENEW"})
-         
-    # Ensure button list doesn't exceed the limit for the first message (max 3)
-    if len(buttons) > 3:
-        initial_buttons = buttons[:3]
-        final_buttons = buttons[3:]
-    else:
-        initial_buttons = buttons
-        final_buttons = []
-        
-    send_whatsapp_message(
-        user_id,
-        "Manage your bot settings ⚙️",
-        buttons=initial_buttons
-    )
-    
-    if final_buttons:
-        final_buttons.append({"text": "🆘 Help", "command": "CMD_HELP"})
-        send_whatsapp_message(
-            user_id,
-            "More settings...",
-            buttons=final_buttons
-        )
-    
-def _cmd_add_agent_menu(user_id: str):
-    """Admin feature: Provides agent management menu."""
-    if not _check_admin_permissions(user_id, "Agent Management"):
-        return
-        
-    buttons = [
-        {"text": "➕ Add Member (Invite)", "command": "CMD_AGENT_INVITE"},
-        {"text": "👥 View Current Agents", "command": "CMD_LIST_AGENTS"},
-        {"text": "🚫 Remove Member", "command": "CMD_REMOVE_AGENT"},
-    ]
-    
-    send_whatsapp_message(
-        user_id,
-        "👑 *Agent Management Menu*",
-        buttons=buttons
-    )
-
-
-def _cmd_start_sync(user_id: str):
-    """Handles /start command, displaying the main button menu."""
-    _register_agent_sync(user_id)
-
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    company_name = "TriageAI Personal Workspace"
-    if company_id:
-        local_session = Session()
-        try:
-             company_name = local_session.query(Company).get(company_id).name
-        finally:
-             local_session.close()
-
-    message = f"👋 *Welcome to TriageAI, {company_name}!* (via WhatsApp)\n\nChoose an action below 👇"
-    
-    # Base buttons for all users (Active license is required for most features)
-    buttons = [
-        {"text": "➕ Add Lead", "command": "CMD_ADD_LEAD"},
-        {"text": "📊 Pipeline View", "command": "CMD_PIPELINE"},
-        {"text": "📅 Follow-ups", "command": "CMD_FOLLOWUPS"},
-    ]
-    
-    # Second message for remaining buttons (max 3 per message)
-    secondary_buttons = [
-        {"text": "📁 Reports", "command": "CMD_REPORTS"},
-        {"text": "🔍 Search", "command": "CMD_SEARCH"},
-        {"text": "🔧 Settings", "command": "CMD_SETTINGS"},
-    ]
-    
-    # Add Admin-specific buttons if licensed and admin
-    if is_admin and is_active:
-        secondary_buttons.append({"text": "👥 Team Pipeline", "command": "CMD_TEAM_PIPELINE"})
-        
-    # Ensure we don't exceed 3 buttons in the second message either
-    if len(secondary_buttons) > 3:
-         tertiary_buttons = secondary_buttons[3:]
-         secondary_buttons = secondary_buttons[:3]
-    else:
-         tertiary_buttons = []
-        
-    # Send First Message
-    send_whatsapp_message(user_id, message, buttons=buttons)
-    
-    # Send Second Message
-    if secondary_buttons:
-        send_whatsapp_message(user_id, "More actions...", buttons=secondary_buttons)
-        
-    # Send Third Message (if needed, e.g., for Team Pipeline button)
-    if tertiary_buttons:
-        send_whatsapp_message(user_id, "Admin actions...", buttons=tertiary_buttons)
-
+# ==============================
+# 9. WHATSAPP HANDLER IMPLEMENTATIONS
+# ==============================
 
 def _register_agent_sync(user_id: str):
     """Ensures agent and setting exist."""
@@ -2311,7 +2240,6 @@ def _register_agent_sync(user_id: str):
     try:
         agent = local_session.query(Agent).filter(Agent.user_id == user_id).first()
         if not agent:
-            # BUGFIX: Do NOT automatically make the hardcoded ID an admin, rely on purchase flow
             agent = Agent(user_id=user_id, is_admin=False)
             local_session.add(agent)
 
@@ -2323,157 +2251,164 @@ def _register_agent_sync(user_id: str):
         local_session.close()
 
 def _cmd_help_sync(user_id: str):
-    """Handles the new /help command to list all tags."""
-    
+    """Handles the /help command."""
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    core_commands = (
-        "### ⚡ *Core Lead Commands (Requires Active License)*\n"
-        "• Save a new lead: Send lead directly or use `/savelead [details]`\n"
-        "• View personal leads: `/myleads`\n"
-        "• View pending follow-ups: `/myfollowups`\n"
-        "• Update lead status: `/status [ID] [New|Hot|Converted|Follow-Up]`\n"
-        "• Set/Reschedule followup: `/setfollowup [ID] [Date/Time]`\n"
-        "• Add notes to a lead: `/addnote [ID] [Text]`\n"
-        "• Mark followup done/cancel: `/followupdone [ID]`, `/followupcancel [ID]`\n"
-    )
 
-    reporting_commands = (
-        "### 📊 *Reporting & Utilities (Requires Active License)*\n"
-        "• See status counts: `/pipeline`\n"
-        "• Find specific leads: `/search [Keyword/Filter]`\n"
-        "• Generate reports (Text/Excel/PDF): `/report [last week]` or `/reportpdf [date]`\n"
-        "• Daily summary control: `/dailysummary on/off`\n"
-    )
-
-    admin_commands = ""
-    if is_admin and is_active:
-        local_session = Session()
-        try:
-             company = local_session.query(Company).get(company_id)
-             license = company.license
-             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
-             limit = license.agent_limit if license else 1
-             
-             admin_commands = (
-                 "### 👑 *Admin Management (Requires Admin Status)*\n"
-                 f"• Check agent slots: `/remainingslots` (Current: {current_agents}/{limit})\n"
-                 "• Add a new agent: `/addagent [WA Phone No.]`\n"
-                 "• Remove an agent: `/removeagent [WA Phone No.]`\n"
-                 "• See team leads/pipeline: `/teamleads`\n"
-                 "• See team followups: `/teamfollowups`\n"
-                 "• Set company name: `/setcompanyname [Name]`\n"
-             )
-        finally:
-             local_session.close()
-    
-    # Updated licensing flow logic
-    _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    licensing_commands = ""
-    
-    if is_admin and not is_active:
-         # Expired Admin sees /renew
-         licensing_commands = (
-            "### 🔑 *Account Management*\n"
-            "• View license status: `/licensesetup`\n"
-            "• **Renew your expired license:** `/renew`\n"
-         )
-    elif not company_id:
-         # New/Individual user sees /register (link to purchase site) and /activate (for key)
-         licensing_commands = (
-            "### 🔑 *Account Management*\n"
-            "• Purchase new license: `/register`\n"
-            "• Activate a license key: `/activate [KEY]`\n"
-            "• View license status: `/licensesetup`\n"
-         )
-    else:
-         # Active Admin/Agent sees status/activate/renew
-         licensing_commands = (
-            "### 🔑 *Account Management*\n"
-            "• View license status: `/licensesetup`\n"
-            "• Activate a license key: `/activate [KEY]`\n"
-            "• Renew subscription: `/renew`\n"
-         )
-
-    
     welcome_text = (
-        f"👋 *TriageAI Command Tags List*\n\n"
-        f"Send `/start` for the main button menu.\n\n"
-        f"{core_commands}\n"
-        f"{reporting_commands}\n"
-        f"{admin_commands}\n"
-        f"{licensing_commands}"
+        f"👋 *TriageAI Help*\n\n"
+        f"Use the button menu by sending */start* to navigate through all features.\n\n"
+        f"Quick Commands:\n"
+        f"• `/start` - Main menu\n"
+        f"• `/help` - This help message\n"
+        f"• `/licensesetup` - View license status\n"
+        f"• `/myleads` - View your leads\n"
+        f"• `/myfollowups` - View followups\n"
+        f"• `/pipeline` - Pipeline view\n\n"
+        f"Or simply send a message with lead details to add a new lead!"
     )
 
     send_whatsapp_message(user_id, welcome_text)
 
-# The rest of the original command implementations follow, ensuring they use the existing
-# logic and session management.
+def _cmd_view_profile(user_id: str):
+    """Shows user profile information."""
+    company_name, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
-# ... (Original implementations of _cmd_add_note_sync, _cmd_debug_jobs_sync, 
-# _next_followups_cmd_sync, _team_followups_cmd_sync, _daily_summary_control_sync,
-# _pipeline_view_cmd_sync, _team_leads_cmd_sync, _check_admin_permissions, 
-# _cmd_set_company_name_sync, _cmd_license_setup_sync, _cmd_renew_sync,
-# _cmd_activate_sync, _cmd_add_agent_sync, _cmd_verify_agent_otp_sync,
-# _cmd_remove_agent_sync, _cmd_remaining_slots_sync, _search_cmd_sync,
-# _report_cmd_sync_with_arg, _report_follow_up_prompt, _report_file_cmd_sync,
-# _send_text_report, _generate_and_send_file_sync, _status_update_cmd_sync,
-# _handle_followup_cmd_sync, _process_incoming_lead_sync, 
-# _send_admin_renewal_message_sync, _send_admin_welcome_message_sync_fixed) ...
-
-def _cmd_add_note_sync(user_id: str, arg: str):
-    """Handles /addnote [ID] [text]"""
-    # CRITICAL: Access Control Check
-    if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to add notes. Send `/renew` or `/licensesetup`.")
-        return
-        
     local_session = Session()
     try:
-        parts = arg.split(maxsplit=1)
-        if len(parts) != 2:
-            send_whatsapp_message(user_id, "Usage: `/addnote [Lead ID] [Note Text]`")
-            return
-
-        try:
-            lead_id = int(parts[0].strip())
-            note_text = parts[1].strip()
-        except ValueError:
-            send_whatsapp_message(user_id, "❌ Invalid Lead ID format. Must be a number.")
-            return
-
-        lead = local_session.query(Lead).get(lead_id)
-
-        if not lead:
-            send_whatsapp_message(user_id, f"❌ TriageAI Lead ID {lead_id} not found in the database.")
-            return
-
-        # Permission check: must be owner or company admin
-        is_owner = lead.user_id == user_id
-        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-
-        is_company_admin = False
-        if is_admin and is_active and company_id and lead.user_id:
-            lead_agent = local_session.query(Agent).filter(Agent.user_id == lead.user_id).first()
-            if lead_agent and lead_agent.company_id == company_id:
-                is_company_admin = True
-
-        if not (is_owner or is_company_admin):
-            send_whatsapp_message(user_id, f"❌ You do not have permission to add notes to Lead ID {lead.id}. Only the owner or a company admin can update this.")
-            return
-
-        # Append note with timestamp
-        now_ist = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M')
-        new_note = f"\n\n--- Note ({now_ist}): {note_text}"
+        profile = local_session.query(UserProfile).filter(UserProfile.phone == user_id).first()
         
-        # Check if adding the new note exceeds the 1000 character limit
-        if len(lead.note) + len(new_note) > 1000:
-            send_whatsapp_message(user_id, "⚠️ Note exceeds the maximum length of 1000 characters. Please summarize.")
-            return
+        message = f"👤 *Your Profile*\n\n"
+        message += f"Company: *{company_name}*\n"
+        message += f"Status: {'✅ ACTIVE' if is_active else '❌ INACTIVE'}\n"
+        message += f"Role: {'👑 Admin' if is_admin else '👤 Agent'}\n"
+        
+        if profile:
+            message += f"\nName: {profile.name}\n"
+            message += f"Email: {profile.email}\n"
+        
+        send_whatsapp_message(user_id, message)
+    finally:
+        local_session.close()
 
-        lead.note += new_note
-        local_session.commit()
-        send_whatsapp_message(user_id, f"✅ Note successfully added to *{lead.name}* [ID: {lead.id}].")
+def _cmd_list_agents(user_id: str):
+    """Lists all agents in the company."""
+    if not _check_admin_permissions(user_id, "List Agents"):
+        return
+
+    local_session = Session()
+    try:
+        _, company_id, _, _, _ = get_agent_company_info(user_id)
+        
+        agents = local_session.query(Agent).filter(Agent.company_id == company_id).all()
+        
+        message = f"👥 *Company Agents* ({len(agents)} total)\n\n"
+        
+        for agent in agents:
+            role = "👑 Admin" if agent.is_admin else "👤 Agent"
+            message += f"{role}: {agent.user_id}\n"
+        
+        send_whatsapp_message(user_id, message)
+    finally:
+        local_session.close()
+
+def _search_by_status(user_id: str, status: str):
+    """Helper to search leads by status."""
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required. Send /renew or /licensesetup.")
+        return
+
+    _search_cmd_sync(user_id, f"status {status}", scope='personal')
+
+def _show_today_followups(user_id: str):
+    """Shows today's follow-ups."""
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required. Send /renew or /licensesetup.")
+        return
+
+    local_session = Session()
+    try:
+        today_start = datetime.now(TIMEZONE).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = datetime.now(TIMEZONE).replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        today_start_utc = today_start.astimezone(pytz.utc).replace(tzinfo=None)
+        today_end_utc = today_end.astimezone(pytz.utc).replace(tzinfo=None)
+        
+        leads = local_session.query(Lead).filter(
+            Lead.user_id == user_id,
+            Lead.followup_status == "Pending",
+            Lead.followup_date >= today_start_utc,
+            Lead.followup_date <= today_end_utc
+        ).order_by(Lead.followup_date).all()
+        
+        if not leads:
+            send_whatsapp_message(user_id, "✅ No follow-ups scheduled for today!")
+            return
+        
+        response = f"📅 *Today's Follow-ups* ({len(leads)} total)\n\n"
+        
+        for lead in leads:
+            followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p')
+            response += f"• *{lead.name}* at {followup_time}\n  {lead.phone}\n  ID: {lead.id}\n\n"
+        
+        send_whatsapp_message(user_id, response)
+    finally:
+        local_session.close()
+
+def _show_missed_followups(user_id: str):
+    """Shows overdue/missed follow-ups."""
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required. Send /renew or /licensesetup.")
+        return
+
+    local_session = Session()
+    try:
+        now_utc = datetime.utcnow().replace(tzinfo=None)
+        
+        leads = local_session.query(Lead).filter(
+            Lead.user_id == user_id,
+            Lead.followup_status == "Pending",
+            Lead.followup_date < now_utc
+        ).order_by(Lead.followup_date).all()
+        
+        if not leads:
+            send_whatsapp_message(user_id, "✅ No overdue follow-ups!")
+            return
+        
+        response = f"⚠️ *Overdue Follow-ups* ({len(leads)} total)\n\n"
+        
+        for lead in leads:
+            followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
+            response += f"• *{lead.name}* (was due: {followup_time})\n  {lead.phone}\n  ID: {lead.id}\n\n"
+        
+        send_whatsapp_message(user_id, response)
+    finally:
+        local_session.close()
+
+def _show_completed_followups(user_id: str):
+    """Shows completed follow-ups."""
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required. Send /renew or /licensesetup.")
+        return
+
+    local_session = Session()
+    try:
+        leads = local_session.query(Lead).filter(
+            Lead.user_id == user_id,
+            Lead.followup_status == "Done"
+        ).order_by(Lead.followup_date.desc()).limit(10).all()
+        
+        if not leads:
+            send_whatsapp_message(user_id, "No completed follow-ups found.")
+            return
+        
+        response = f"✅ *Recently Completed* (Last 10)\n\n"
+        
+        for lead in leads:
+            if lead.followup_date:
+                followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%b %d')
+                response += f"• *{lead.name}* ({followup_time})\n  {lead.phone}\n  ID: {lead.id}\n\n"
+        
+        send_whatsapp_message(user_id, response)
     finally:
         local_session.close()
 
@@ -2489,7 +2424,6 @@ def _cmd_debug_jobs_sync(user_id: str):
     response = f"🔍 *TriageAI Scheduled Jobs* (Current time: {current_time})\n\n"
 
     for job in jobs:
-        # BUGFIX: Handle potential NoneType if next_run_time is null for a job
         next_run_str = job.next_run_time.astimezone(TIMEZONE).strftime('%I:%M %p, %b %d %Z') if job.next_run_time else 'N/A'
         response += f"• *{job.id}*\n"
         response += f"  Next run: {next_run_str}\n"
@@ -2498,12 +2432,11 @@ def _cmd_debug_jobs_sync(user_id: str):
     send_whatsapp_message(user_id, response)
 
 def _next_followups_cmd_sync(user_id: str, scope: str = 'personal'):
-    """Show upcoming pending follow-ups (personal or team)."""
-    # CRITICAL: Access Control Check
+    """Show upcoming pending follow-ups."""
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view follow-ups. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view follow-ups. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
         now_utc_naive = datetime.utcnow().replace(tzinfo=None)
@@ -2513,7 +2446,7 @@ def _next_followups_cmd_sync(user_id: str, scope: str = 'personal'):
                 Lead.user_id == user_id,
             )
             title = "Your Next 5 TriageAI Follow-ups:"
-        else: # team scope
+        else:
             _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
             if not (is_admin and is_active and company_id):
                 send_whatsapp_message(user_id, "❌ Command *teamfollowups* failed: You must be an active company admin.")
@@ -2538,8 +2471,6 @@ def _next_followups_cmd_sync(user_id: str, scope: str = 'personal'):
         response = f"🗓️ *{title}*\n"
 
         for lead in leads:
-            # DB stores naive UTC, localize to UTC, then convert to IST for display
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
             agent_info = f" (Agent: {hash_user_id(lead.user_id)})" if scope == 'team' else ""
 
@@ -2556,18 +2487,15 @@ def _next_followups_cmd_sync(user_id: str, scope: str = 'personal'):
     finally:
         local_session.close()
 
-# Keep these for backwards compatibility with the routing logic
 def _team_followups_cmd_sync(user_id: str):
     _next_followups_cmd_sync(user_id, scope='team')
 
-
 def _daily_summary_control_sync(user_id: str, arg: str):
     """Daily summary control."""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to control summaries. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to control summaries. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
         action = arg.lower()
@@ -2576,7 +2504,6 @@ def _daily_summary_control_sync(user_id: str, arg: str):
             setting = UserSetting(user_id=user_id)
             local_session.add(setting)
 
-        # BUGFIX 2: Use user_id in the job ID
         job_id = f"daily_summary_{user_id}"
 
         if "on" in action:
@@ -2588,7 +2515,7 @@ def _daily_summary_control_sync(user_id: str, arg: str):
                 'cron',
                 hour=DAILY_SUMMARY_TIME,
                 timezone=TIMEZONE,
-                id=job_id, # Use user-specific ID
+                id=job_id,
                 replace_existing=True
             )
             send_whatsapp_message(user_id, f"🔔 Daily TriageAI {DAILY_SUMMARY_TIME} PM IST summary is now *ON*.")
@@ -2607,34 +2534,19 @@ def _daily_summary_control_sync(user_id: str, arg: str):
     finally:
         local_session.close()
 
-# --- FIX 5: _pipeline_view_cmd_sync uses local_session ---
 def _pipeline_view_cmd_sync(user_id: str, scope: str = 'personal'):
     """Pipeline view."""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to view pipelines. Send /renew or /licensesetup.")
         return
-        
-    # format_pipeline_text now handles its own session creation/closing
+
     text = format_pipeline_text(user_id, scope=scope)
     send_whatsapp_message(user_id, text)
-
-def _team_leads_cmd_sync(user_id: str):
-    """Admin feature: See the entire company lead pipeline."""
-    if not _check_admin_permissions(user_id, "/teamleads"):
-        return
-
-    # format_pipeline_text automatically handles admin view via get_user_leads_query
-    # BUGFIX: Explicitly request 'team' scope
-    text = format_pipeline_text(user_id, scope='team')
-    send_whatsapp_message(user_id, text)
-
 
 def _check_admin_permissions(user_id: str, command: str) -> bool:
     """Helper to check admin status and send error message if not an admin."""
     _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-    
-    # Combined check for active license and admin status
+
     if not is_active:
         send_whatsapp_message(user_id, f"❌ Command *{command}* failed: Your TriageAI license is inactive. Send `/renew` or `/licensesetup`.")
         return False
@@ -2673,7 +2585,6 @@ def _cmd_license_setup_sync(user_id: str):
             company = local_session.query(Company).get(company_id)
             license = company.license
 
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
             expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A (Perpetual)'
             current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
@@ -2705,30 +2616,23 @@ def _cmd_license_setup_sync(user_id: str):
         )
     finally:
         local_session.close()
-        
+
 def _cmd_renew_sync(user_id: str):
-    """
-    Provides the personalized link for license renewal to expired/active admins. 
-    Directs new users to /register.
-    """
-    WEBSITE_URL = "https://triageai.online/" # Base URL
+    """Provides the personalized link for license renewal."""
+    WEBSITE_URL = "https://triageai.online/"
 
     local_session = Session()
     try:
         _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
-        
-        # Check if the user is linked to ANY company and is the admin
+
         if company_id and is_admin:
             company = local_session.query(Company).get(company_id)
             license = company.license
             
-            # Admins (Expired or Active) get the renewal link.
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             expiry_dt_ist = pytz.utc.localize(license.expires_at).astimezone(TIMEZONE) if license.expires_at else None
             expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A'
             status_text = '✅ ACTIVE' if is_active else '❌ EXPIRED'
 
-            # --- RENEWAL PATH (Existing Admin/Individual Admin) ---
             renewal_token = generate_renewal_token(user_id)
             renewal_link = f"{WEBSITE_URL}renew_link/{renewal_token}"
             
@@ -2744,7 +2648,6 @@ def _cmd_renew_sync(user_id: str):
             send_whatsapp_message(user_id, message)
             
         else:
-             # Non-Admin, Non-Licensed, or Agent trying to buy a new license (New User Flow)
             send_whatsapp_message(
                 user_id,
                 f"💳 *TriageAI Registration/Purchase*\n\n"
@@ -2758,10 +2661,9 @@ def _cmd_activate_sync(user_id: str, key_input: str):
     local_session = Session()
     try:
         if not key_input:
-            send_whatsapp_message(user_id, "Please provide the TriageAI license key. Usage: `/activate [key]`")
+            send_whatsapp_message(user_id, "Please provide the TriageAI license key. Usage: /activate [key]")
             return
 
-        # Find an unclaimed, non-expired license
         license_to_activate = local_session.query(License).filter(
             and_(
                 License.key == key_input.strip().upper(),
@@ -2773,14 +2675,12 @@ def _cmd_activate_sync(user_id: str, key_input: str):
             send_whatsapp_message(user_id, "❌ Invalid, expired, or already claimed license key.")
             return
 
-        # BUGFIX: Check for expiry before activation
         if license_to_activate.expires_at and license_to_activate.expires_at < datetime.utcnow():
             local_session.delete(license_to_activate)
             local_session.commit()
             send_whatsapp_message(user_id, "❌ License key found but is expired and has been purged.")
             return
 
-        # 1. Create Company based on existing profile or default name
         profile = local_session.query(UserProfile).filter(UserProfile.phone == user_id).first()
         company_name = profile.company_name if profile and profile.company_name else f"TriageAI Company {user_id}"
 
@@ -2788,14 +2688,11 @@ def _cmd_activate_sync(user_id: str, key_input: str):
         local_session.add(company)
         local_session.flush()
 
-        # 2. Update License
         license_to_activate.company_id = company.id
         license_to_activate.is_active = True
 
-        # 3. Update Agent (make the current user the admin)
         agent = local_session.query(Agent).filter(Agent.user_id == user_id).first()
         if not agent:
-            # Should have been created by _register_agent_sync, but safety creation
             agent = Agent(user_id=user_id)
             local_session.add(agent)
 
@@ -2823,8 +2720,8 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
     try:
         if not _check_admin_permissions(user_id, "/addagent"):
             return
-            
-        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id) # is_active/is_admin checked above
+
+        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
         company = local_session.query(Company).get(company_id)
         license = company.license
@@ -2845,7 +2742,6 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
 
         new_agent = local_session.query(Agent).filter(Agent.user_id == new_agent_id).first()
         if not new_agent:
-            # NOTE: User must have messaged the bot at least once for an Agent record to exist.
             send_whatsapp_message(user_id, "❌ The user must have sent a message to this TriageAI bot at least once.")
             return
 
@@ -2857,10 +2753,8 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
             send_whatsapp_message(user_id, "❌ This agent is already linked to another company. They must be removed from there first.")
             return
 
-        # --- NEW: Generate and Send OTP to Agent for verification ---
         otp = generate_otp()
 
-        # Store OTP state specifically for agent onboarding
         OTP_STORE[new_agent_id] = {
             'otp': otp,
             'timestamp': datetime.now(TIMEZONE),
@@ -2870,10 +2764,9 @@ def _cmd_add_agent_sync(user_id: str, new_agent_id_str: str):
             'company_id': company_id
         }
 
-        # Send OTP message to the new agent's WhatsApp
         agent_otp_message = (
             f"Hi! You have been invited to join *{company.name}* on TriageAI.\n"
-            f"🔒 Your one-time verification code is: *{otp}*\n"
+            f"🔐 Your one-time verification code is: *{otp}*\n"
             f"Reply with *only the {otp} code* to this chat to confirm your agent account."
         )
         send_whatsapp_message(new_agent_id, agent_otp_message)
@@ -2900,33 +2793,27 @@ def _cmd_verify_agent_otp_sync(sender_wa_id: str, otp_input: str):
             send_whatsapp_message(sender_wa_id, "⚠️ Invalid state or OTP expired. Please ask your Admin to re-add you.")
             return
 
-        # Validate OTP
         if not verify_whatsapp_otp(sender_wa_id, otp_input):
             send_whatsapp_message(sender_wa_id, "❌ Invalid or expired OTP. Please try again or ask your Admin to re-add you.")
             return
 
-        # Verification successful - finalize agent linking
         company_id = otp_state['company_id']
         company = local_session.query(Company).get(company_id)
 
-        # Update Agent
         agent = local_session.query(Agent).filter(Agent.user_id == sender_wa_id).first()
         agent.company_id = company_id
         agent.is_admin = False
 
         local_session.commit()
 
-        # Clear OTP state
         del OTP_STORE[sender_wa_id]
 
-        # Send final welcome message to agent
         final_agent_welcome_message = (
             f"Hi! TriageAI welcomes you to *{company.name}*.\n\n"
-            f"Your account is active. Send `/help` for a list of commands."
+            f"Your account is active. Send `/help` or `/start` for the menu."
         )
         send_whatsapp_message(sender_wa_id, final_agent_welcome_message)
 
-        # Notify Admin
         admin_id = otp_state['admin_id']
         current_agents = local_session.query(Agent).filter(Agent.company_id == company_id).count()
         license = local_session.query(License).filter(License.company_id == company_id).first()
@@ -2961,14 +2848,13 @@ def _cmd_remove_agent_sync(user_id: str, agent_id_str: str):
         agent_to_remove = local_session.query(Agent).filter(
             Agent.user_id == agent_id_str,
             Agent.company_id == company_id,
-            Agent.is_admin == False # Cannot remove an admin this way
+            Agent.is_admin == False
         ).first()
 
         if not agent_to_remove:
             send_whatsapp_message(user_id, "❌ Agent not found in your company or you are trying to remove the Admin.")
             return
 
-        # Remove company link and make them an individual agent again
         agent_to_remove.company_id = None
         local_session.commit()
 
@@ -3004,21 +2890,14 @@ def _cmd_remaining_slots_sync(user_id: str):
     finally:
         local_session.close()
 
-# _team_leads_cmd_sync is now a wrapper for _search_cmd_sync(scope='team')
-
-# _team_followups_cmd_sync is now a wrapper for _next_followups_cmd_sync(scope='team')
-
-
 def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
-    """Instant search by keyword, name, phone, or status (personal or team)."""
-    # CRITICAL: Access Control Check
+    """Instant search by keyword, name, phone, or status."""
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for searching. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
-        # Team search requires admin permission
         if scope == 'team' and not _check_admin_permissions(user_id, f"/search (scope: {scope})"):
             return
             
@@ -3034,11 +2913,9 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
             search_type = parts[0].lower()
             search_value = parts[1].strip()
 
-            if search_type in ['name', 'phone', 'status', 'note']:
+            if search_type in ['name', 'phone', 'status']:
                 filter_data = {'search_field': search_type, 'search_value': search_value}
 
-        # BUGFIX: Use the correct scope when fetching leads for search
-        # fetch_filtered_leads now handles its own session
         leads = fetch_filtered_leads(user_id, filter_data)[:15]
 
         if not leads:
@@ -3052,7 +2929,6 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
         response = f"🔍 Found *{len(leads)}* {title}\n\n"
 
         for i, lead in enumerate(leads, 1):
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             created_time = pytz.utc.localize(lead.created_at).astimezone(TIMEZONE).strftime('%b %d, %I:%M %p')
             agent_info = f" (Agent: {hash_user_id(lead.user_id)})" if scope == 'team' else ""
 
@@ -3063,7 +2939,7 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
                 f"  > Created: {created_time}\n\n"
             )
 
-            if len(response) + len(lead_block) > 4000: # WhatsApp limit is 4096
+            if len(response) + len(lead_block) > 4000:
                 send_whatsapp_message(user_id, response)
                 response = "*...TriageAI Search results continued:*\n\n"
 
@@ -3073,17 +2949,14 @@ def _search_cmd_sync(user_id: str, search_query: str, scope: str = 'personal'):
     finally:
         local_session.close()
 
-
 def _report_cmd_sync_with_arg(user_id: str, query: str):
     """Handles /report command with a date query argument provided immediately."""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send /renew or /licensesetup.")
         return
-        
+
     logging.info(f"🎯 _report_cmd_sync_with_arg called with query: '{query}'")
 
-    # Process the query immediately to get filters
     filters = get_report_filters(query)
     timeframe_label = filters['label']
 
@@ -3092,15 +2965,14 @@ def _report_cmd_sync_with_arg(user_id: str, query: str):
 
     logging.info(f"📅 Calculated date range: {start_str} to {end_str}")
 
-    # CRITICAL: This is what gets passed to the button
     report_arg = f"{start_str} to {end_str}"
 
-    logging.info(f"🔘 Button will send this arg: '{report_arg}'")
+    logging.info(f"📘 Button will send this arg: '{report_arg}'")
 
     buttons = [
-        {"text": "📄 Text", "command": f"CMD_reporttext_{report_arg.replace(' ', '_')}"},
-        {"text": "📊 Excel", "command": f"CMD_reportexcel_{report_arg.replace(' ', '_')}"},
-        {"text": "📑 PDF", "command": f"CMD_reportpdf_{report_arg.replace(' ', '_')}"}
+        {"text": "📄 Text", "command": f"reporttext {report_arg}"},
+        {"text": "📊 Excel", "command": f"reportexcel {report_arg}"},
+        {"text": "📘 PDF", "command": f"reportpdf {report_arg}"}
     ]
 
     send_whatsapp_message(
@@ -3113,14 +2985,12 @@ def _report_cmd_sync_with_arg(user_id: str, query: str):
     )
     return
 
-
 def _report_follow_up_prompt(user_id: str):
     """Prompts the user for the report date/range."""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send /renew or /licensesetup.")
         return
-        
+
     prompt_message = (
         "🗓️ *TriageAI Report Generation: Date Required*\n\n"
         "Please send the period you want to report on as a text message now. Examples:\n"
@@ -3131,26 +3001,20 @@ def _report_follow_up_prompt(user_id: str):
     )
     send_whatsapp_message(user_id, prompt_message)
 
-
 def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
     """Handles the final report generation triggered by a button press or direct command."""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for reporting. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
-        # Extract the date range from the end of the command/button ID
-        # e.g., /reportpdf 2024-01-01 to 2024-01-31
         parts = full_command.split(maxsplit=1)
         original_query = parts[1] if len(parts) > 1 else ""
 
-        # Get filters based on the original query (which now contains the explicit date range)
         filters = get_report_filters(original_query)
         timeframe_label: str = filters.get('label', 'Report')
 
-        # fetch_filtered_leads now handles its own session internally
         leads = fetch_filtered_leads(user_id, filters)
 
         if not leads:
@@ -3160,7 +3024,6 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
         if file_type == 'text':
             _send_text_report(user_id, leads, timeframe_label)
         else:
-            # File generation (Excel/PDF) runs in a new thread as it can be time-consuming
             threading.Thread(
                 target=_generate_and_send_file_sync,
                 args=(user_id, leads, file_type, timeframe_label, filters)
@@ -3169,20 +3032,16 @@ def _report_file_cmd_sync(user_id: str, file_type: str, full_command: str):
     finally:
         local_session.close()
 
-
 def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
     """Helper to send a text report."""
-    response = f"📊 *TriageAI Report for {timeframe_label} ({len(leads)} Total Leads)*\n\n"
+    response = f"📊 TriageAI Report for {timeframe_label} ({len(leads)} Total Leads)\n\n"
 
-    # Limit text report to 15 leads due to length
     for i, lead in enumerate(leads[:15], 1):
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         created_time = pytz.utc.localize(lead.created_at).astimezone(TIMEZONE).strftime('%b %d, %I:%M %p')
 
         followup_info = 'Follow-up: N/A'
         if lead.followup_date:
             try:
-                # BUGFIX: Use pytz.utc.localize for robust conversion
                 followup_time = pytz.utc.localize(lead.followup_date).astimezone(TIMEZONE).strftime('%I:%M %p, %b %d')
                 followup_info = f"Follow-up: {followup_time} (Status: {lead.followup_status})"
             except Exception:
@@ -3200,17 +3059,15 @@ def _send_text_report(user_id: str, leads: List[Lead], timeframe_label: str):
             send_whatsapp_message(user_id, response)
             response = f"*(TriageAI Report for {timeframe_label} continued...)*\n\n"
 
-            response += item_text + "\n"
+        response += item_text + "\n"
 
     if len(leads) > 15:
         response += f"*(...only first 15 of {len(leads)} shown in text report. Choose Excel/PDF for full report.)*"
 
     send_whatsapp_message(user_id, response)
 
-
 def _generate_and_send_file_sync(user_id: str, leads: List[Lead], file_type: str, filename_label: str, filters: Dict[str, Any]):
     """Generates the file and calls the document sender."""
-
     try:
         df = create_report_dataframe(leads)
     except Exception as e:
@@ -3227,7 +3084,6 @@ def _generate_and_send_file_sync(user_id: str, leads: List[Lead], file_type: str
             if not HAS_REPORTLAB:
                 send_whatsapp_message(user_id, "❌ PDF generation failed: Required library (reportlab) is not installed on the server.")
                 return
-            # Pass filters to the updated PDF function
             file_buffer = create_report_pdf(user_id, df, filters)
             filename = f"TriageAI_Report_{filename_label}.pdf"
             mime_type = "application/pdf"
@@ -3235,21 +3091,18 @@ def _generate_and_send_file_sync(user_id: str, leads: List[Lead], file_type: str
             send_whatsapp_message(user_id, "❌ Invalid file format requested.")
             return
 
-        # Use the core utility to upload and send
         send_whatsapp_document(user_id, file_buffer, filename, mime_type)
 
     except Exception as e:
         logging.error(f"Failed to generate and send {file_type} TriageAI report: {e}")
         send_whatsapp_message(user_id, f"❌ Failed to generate or send the {file_type.upper()} report due to a server error. Please try the Text option.")
 
-
 def _status_update_cmd_sync(user_id: str, arg: str):
     """Handles /status [ID] [New|Hot|Converted|Follow-Up]"""
-    # CRITICAL: Access Control Check
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to update status. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to update status. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
         parts = arg.split(maxsplit=1)
@@ -3274,7 +3127,6 @@ def _status_update_cmd_sync(user_id: str, arg: str):
             send_whatsapp_message(user_id, f"❌ TriageAI Lead ID {lead_id} not found in the database.")
             return
 
-        # Permission check
         is_owner = lead.user_id == user_id
         _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
 
@@ -3295,18 +3147,11 @@ def _status_update_cmd_sync(user_id: str, arg: str):
         local_session.close()
 
 def _handle_followup_cmd_sync(user_id: str, full_command: str):
-    """
-    Handles all follow-up commands:
-    /setfollowup [ID] [Time]
-    /followupdone [ID]
-    /followupcancel [ID]
-    /followupreschedule [ID] [Time]
-    """
-    # CRITICAL: Access Control Check
+    """Handles all follow-up commands."""
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for follow-ups. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required for follow-ups. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
         command_parts = full_command.split(maxsplit=1)
@@ -3325,7 +3170,6 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
             return
 
         lead = local_session.query(Lead).get(lead_id)
-        # Follow-up actions are strictly for the lead owner
         if not lead or lead.user_id != user_id:
             send_whatsapp_message(user_id, f"❌ TriageAI Follow-up action failed. Lead ID {lead_id} not found or doesn't belong to you.")
             return
@@ -3339,7 +3183,7 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
             local_session.commit()
             send_whatsapp_message(user_id, f"✅ Follow-up for *{lead.name}* marked as *{status}*.")
 
-        elif action in ["reschedule", ""]: # "" covers /setfollowup
+        elif action in ["reschedule", ""]:
             new_time_text = arg_parts[1].strip() if len(arg_parts) == 2 else ""
 
             if not new_time_text:
@@ -3351,9 +3195,7 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
 
             if extracted and extracted.get("followup_date"):
                 try:
-                    # Convert AI-generated IST time string back to naive UTC for DB
                     dt_ist = datetime.strptime(extracted["followup_date"], '%Y-%m-%d %H:%M:%S')
-                    # BUGFIX: Use pytz.utc.localize for robust conversion
                     new_followup_dt = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
                 except ValueError:
                     pass
@@ -3363,10 +3205,8 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
                 lead.followup_status = "Pending"
                 local_session.commit()
 
-                # Reschedule job
                 schedule_followup(lead.user_id, lead.id, lead.name, lead.phone, new_followup_dt)
 
-                # BUGFIX: Use pytz.utc.localize for robust conversion
                 display_dt = pytz.utc.localize(new_followup_dt).astimezone(TIMEZONE)
 
                 send_whatsapp_message(
@@ -3380,16 +3220,66 @@ def _handle_followup_cmd_sync(user_id: str, full_command: str):
     finally:
         local_session.close()
 
-def _process_incoming_lead_sync(user_id: str, message_body: str):
-    """Processes a new lead message, handling extraction and duplicates."""
-    # CRITICAL: Access Control Check
+def _cmd_add_note_sync(user_id: str, arg: str):
+    """Handles /addnote [ID] [text]"""
     if not _check_active_license(user_id):
-        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to save leads. Send `/renew` or `/licensesetup`.")
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to add notes. Send /renew or /licensesetup.")
         return
-        
+
     local_session = Session()
     try:
-        # 1. Extract Lead Data
+        parts = arg.split(maxsplit=1)
+        if len(parts) != 2:
+            send_whatsapp_message(user_id, "Usage: `/addnote [Lead ID] [Note Text]`")
+            return
+
+        try:
+            lead_id = int(parts[0].strip())
+            note_text = parts[1].strip()
+        except ValueError:
+            send_whatsapp_message(user_id, "❌ Invalid Lead ID format. Must be a number.")
+            return
+
+        lead = local_session.query(Lead).get(lead_id)
+
+        if not lead:
+            send_whatsapp_message(user_id, f"❌ TriageAI Lead ID {lead_id} not found in the database.")
+            return
+
+        is_owner = lead.user_id == user_id
+        _, company_id, is_active, is_admin, _ = get_agent_company_info(user_id)
+
+        is_company_admin = False
+        if is_admin and is_active and company_id and lead.user_id:
+            lead_agent = local_session.query(Agent).filter(Agent.user_id == lead.user_id).first()
+            if lead_agent and lead_agent.company_id == company_id:
+                is_company_admin = True
+
+        if not (is_owner or is_company_admin):
+            send_whatsapp_message(user_id, f"❌ You do not have permission to add notes to Lead ID {lead.id}. Only the owner or a company admin can update this.")
+            return
+
+        now_ist = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M')
+        new_note = f"\n\n--- Note ({now_ist}): {note_text}"
+        
+        if len(lead.note) + len(new_note) > 1000:
+            send_whatsapp_message(user_id, "⚠️ Note exceeds the maximum length of 1000 characters. Please summarize.")
+            return
+
+        lead.note += new_note
+        local_session.commit()
+        send_whatsapp_message(user_id, f"✅ Note successfully added to *{lead.name}* [ID: {lead.id}].")
+    finally:
+        local_session.close()
+
+def _process_incoming_lead_sync(user_id: str, message_body: str):
+    """Processes a new lead message."""
+    if not _check_active_license(user_id):
+        send_whatsapp_message(user_id, "❌ Feature Restricted: A valid, active TriageAI license is required to save leads. Send /renew or /licensesetup.")
+        return
+
+    local_session = Session()
+    try:
         extracted = extract_lead_data(message_body)
 
         if not extracted or not extracted.get('name') or not extracted.get('phone'):
@@ -3399,7 +3289,6 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
             )
             return
 
-        # 2. Check Duplicates
         duplicate_lead = check_duplicate(extracted['phone'], user_id)
 
         if duplicate_lead:
@@ -3411,22 +3300,18 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
             send_whatsapp_message(user_id, update_message)
             return
 
-        # 3. Handle Followup Date
         followup_dt_utc_naive = None
         if extracted.get("followup_date"):
             try:
-                # Convert AI-generated IST time string back to naive UTC for DB
                 dt_ist = datetime.strptime(extracted["followup_date"], '%Y-%m-%d %H:%M:%S')
-                # BUGFIX: Use pytz.utc.localize for robust conversion
                 followup_dt_utc_naive = TIMEZONE.localize(dt_ist).astimezone(pytz.utc).replace(tzinfo=None)
             except ValueError:
                 logging.warning("Failed to parse AI followup date.")
 
-        # 4. Create New Lead
         lead = Lead(
             user_id=user_id,
             name=extracted['name'],
-            phone=_sanitize_wa_id(extracted['phone']), # Sanitize phone before saving
+            phone=_sanitize_wa_id(extracted['phone']),
             status=extracted['status'],
             source=extracted['source'],
             note=extracted.get('note', ''),
@@ -3435,17 +3320,13 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         )
         local_session.add(lead)
         local_session.commit()
-        # Ensure lead.id is populated for scheduling
         local_session.refresh(lead)
 
-        # 5. Schedule Reminder
         reminder_status = ""
         if followup_dt_utc_naive and schedule_followup(lead.user_id, lead.id, lead.name, lead.phone, followup_dt_utc_naive):
-            # BUGFIX: Use pytz.utc.localize for robust conversion
             display_dt = pytz.utc.localize(followup_dt_utc_naive).astimezone(TIMEZONE)
             reminder_status = f"🔔 Reminder scheduled for {display_dt.strftime('%I:%M %p, %b %d')} IST."
 
-        # 6. Acknowledge User
         send_whatsapp_message(
             user_id,
             f"✅ *TriageAI Lead Saved!* ({lead.name}) [ID: {lead.id}]\nStatus: {lead.status}\nSource: {lead.source}\n{reminder_status}\n\n"
@@ -3459,20 +3340,16 @@ def _process_incoming_lead_sync(user_id: str, message_body: str):
         local_session.close()
 
 def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: datetime):
-    """
-    Sends the final renewal message to the admin after payment.
-    """
+    """Sends the final renewal message to the admin after payment."""
     local_session = Session()
     try:
         profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
         company = local_session.query(Company).filter(Company.admin_user_id == phone).first()
-        
+
         if not profile or not company:
              logging.error(f"❌ Failed to load UserProfile/Company {phone} in renewal thread.")
              return
 
-        # DB stores naive UTC, localize to UTC, then convert to IST for display
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         expiry_dt_ist = pytz.utc.localize(expiry_date).astimezone(TIMEZONE)
         expiry_str = expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y')
 
@@ -3491,25 +3368,19 @@ def _send_admin_renewal_message_sync(phone: str, plan_name: str, expiry_date: da
         local_session.close()
 
 def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str, expiry_date: datetime):
-    """
-    Sends the final welcome message to the admin after payment.
-    """
+    """Sends the final welcome message to the admin after payment."""
     local_session = Session()
     try:
-        # Load the profile using the thread's local session
         profile = local_session.query(UserProfile).filter(UserProfile.phone == phone).first()
-        
+
         if not profile:
              logging.error(f"❌ Failed to load UserProfile {phone} in welcome thread.")
              return
 
-        # DB stores naive UTC, localize to UTC, then convert to IST for display
         start_str = datetime.now(TIMEZONE).strftime('%b %d, %Y')
-        # BUGFIX: Use pytz.utc.localize for robust conversion
         expiry_dt_ist = pytz.utc.localize(expiry_date).astimezone(TIMEZONE)
         expiry_str = expiry_dt_ist.strftime('%b %d, %Y') if expiry_date else 'N/A'
 
-        # This line now safely accesses the profile data via the local session
         company_display = profile.company_name if profile.company_name and profile.company_name != 'Self' else 'Your Personal Workspace'
 
         message = (
@@ -3519,7 +3390,7 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
             f"Validity: {start_str} to *{expiry_str}*\n"
             f"License Key: `{key}`\n\n"
             f"You can now start saving and managing your leads.\n"
-            f"Use `/help` for a list of all commands."
+            f"Use `/start` for the menu or `/help` for all commands."
         )
         send_whatsapp_message(profile.phone, message)
         
@@ -3531,29 +3402,27 @@ def _send_admin_welcome_message_sync_fixed(phone: str, plan_name: str, key: str,
 
 
 # ==============================
-# STARTUP MESSAGE UTILITY
+# 10. STARTUP MESSAGE
 # ==============================
+
 def send_startup_message_sync():
     """Sends a confirmation message to the admin upon script startup."""
     to_user_id = ADMIN_USER_ID
     message = (
-        "🤖 *TriageAI Bot Service Alert*\n\n"
-        "The TriageAI server has successfully initialized and is now listening for incoming webhooks.\n"
-        "Status: ✅ Ready to process messages.\n"
-        "------------------\n"
-        "Try sending: `Rahul needs website, phone 8080xxxx, hot lead call tomorrow at 9am`"
+    "🤖 TriageAI Bot Service Alert\n\n"
+    "The TriageAI server has successfully initialized and is now listening for incoming webhooks.\n"
+    "Status: ✅ Ready to process messages.\n"
+    "------------------\n"
+    "Send /start to see the new button menu!"
     )
 
-    # Check if a dummy ID is used and provide a friendly local test number if available
     if to_user_id == "919999999999":
-        # Placeholder for a local test number
         to_user_id = os.getenv("TEST_ADMIN_PHONE", "917907603148")
 
     if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
         logging.error("Startup message skipped: WhatsApp credentials missing.")
         return
 
-    # Prepare recipient ID
     final_recipient = _sanitize_wa_id(to_user_id)
 
     headers = {
@@ -3567,47 +3436,38 @@ def send_startup_message_sync():
         "text": {"body": message}
     }
     try:
-        # Use a short timeout as this is non-critical startup
         response = requests.post(WHATSAPP_API_URL, headers=headers, json=payload, timeout=5)
         response.raise_for_status()
         logging.info(f"✅ Startup message sent to {final_recipient}.")
     except requests.exceptions.RequestException as e:
         logging.error(f"❌ Failed to send startup message: {e}")
 
+
 # ==============================
-# MAIN APP
+# 11. MAIN APP
 # ==============================
 
 def clear_all_db_on_startup():
-    """
-    * DESTRUCTIVE ACTION FOR TESTING *
-    Clears all application-specific data (Leads, Companies, Licenses, Profiles)
-    and resets agents to individual status.
-    """
+    """DESTRUCTIVE ACTION FOR TESTING - Clears all application-specific data."""
     local_session = Session()
     try:
         logging.warning("--- STARTING AUTOMATIC DATABASE RESET FOR TESTING ---")
 
-        # 1. Clear Leads
         local_session.query(Lead).delete()
         logging.warning("Cleared all Lead data.")
         
-        # 2. Reset Agent Company IDs and Admin status (MUST BE BEFORE DELETING COMPANIES)
         local_session.query(Agent).update({
             Agent.company_id: None, 
             Agent.is_admin: False
         }, synchronize_session=False)
         logging.warning("Reset all Agent company links and admin status.")
         
-        # 3. Clear Licenses (clears link to Company)
         local_session.query(License).delete()
         logging.warning("Cleared all License data.")
 
-        # 4. Clear Companies (Now safe to delete because Agent.company_id is NULL)
         local_session.query(Company).delete()
         logging.warning("Cleared all Company data.")
         
-        # 5. Clear Temporary Web Profiles (for fresh signup on web)
         local_session.query(UserProfile).delete()
         logging.warning("Cleared all UserProfile data (Web Signup State).")
 
@@ -3617,10 +3477,8 @@ def clear_all_db_on_startup():
     except Exception as e:
         local_session.rollback()
         logging.critical(f"FATAL ERROR DURING DB CLEAR: {e}")
-        # Allow the application to proceed, but log a severe warning
     finally:
         local_session.close()
-
 
 def run_flask():
     """Starts the Flask web server."""
@@ -3629,16 +3487,6 @@ def run_flask():
 
 def run_scheduler():
     """Starts the scheduler in its own event loop/thread and adds recurring jobs."""
-    # NOTE: Daily summary job is added with a generic ID here and will be replaced
-    # by a user-specific ID when a user enables it.
-    
-    # Add a dummy daily job which immediately gets overwritten by the user's action.
-    # This prevents the initial job from being scheduled with a hardcoded ID if no user opts in.
-    # We rely on the _daily_summary_control_sync to add the user-specific job.
-    pass
-
-
-    # Also add a job to check for overdue followups (e.g., every 1 hour)
     scheduler.add_job(
         _check_overdue_followups_sync,
         'interval',
@@ -3647,19 +3495,16 @@ def run_scheduler():
         replace_existing=True
     )
 
-    # BackgroundScheduler.start() starts a dedicated thread and is non-blocking.
     scheduler.start()
     logging.info("TriageAI Scheduler started in background.")
 
 def main_concurrent():
     """Main function that runs both Flask and scheduler."""
-    # Environment Variable Check
     if not os.getenv("NEW_TOKEN") and not os.getenv("WHATSAPP_ACCESS_TOKEN") or not GEMINI_KEY or not WHATSAPP_PHONE_ID:
         print("❌ ERROR: NEW_TOKEN (or WHATSAPP_ACCESS_TOKEN), GEMINI_API_KEY, or WHATSAPP_PHONE_ID not set")
         return
 
     global WHATSAPP_TOKEN
-    # Use NEW_TOKEN preference, fallback to WHATSAPP_ACCESS_TOKEN
     if os.getenv("NEW_TOKEN"):
         WHATSAPP_TOKEN = os.getenv("NEW_TOKEN")
     elif os.getenv("WHATSAPP_ACCESS_TOKEN"):
@@ -3668,16 +3513,13 @@ def main_concurrent():
     if WEB_AUTH_TOKEN == "super_secret_web_key_123":
         print("⚠️ WARNING: WEB_AUTH_TOKEN is using default. Set it as an env var for security!")
 
-    # * STEP 1: CLEAR DB BEFORE STARTING *
-    clear_all_db_on_startup()
-    
-    # * STEP 2: START SCHEDULER *
+    # COMMENT OUT THIS LINE IN PRODUCTION - Only for testing
+    # clear_all_db_on_startup()
+
     run_scheduler()
 
-    # Send startup message in background thread
     threading.Thread(target=send_startup_message_sync, daemon=True).start()
 
-    # Run Flask (blocking, but scheduler continues in background)
     logging.info("🚀 All TriageAI services initialized. Starting Flask server...")
     run_flask()
 
@@ -3686,5 +3528,4 @@ if __name__ == "__main__":
         main_concurrent()
     except KeyboardInterrupt:
         logging.info("\n👋 TriageAI Service stopped by user")
-        # Ensure the scheduler is cleanly shut down when the service is stopped
         scheduler.shutdown()
