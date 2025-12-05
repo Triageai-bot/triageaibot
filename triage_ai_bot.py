@@ -1248,7 +1248,7 @@ def renew_link_handler(token: str):
         company = local_session.query(Company).get(agent.company_id)
         license = company.license
         
-        # --- License.plan_name contains the full label like "Individual (1 Agent) Monthly" ---
+        # --- License.plan_name contains the full label like "Individual (1 Agent) Annual (Discounted)" ---
         
         # Determine the base plan key based on the stored plan_name
         base_plan_key = 'individual'
@@ -1257,20 +1257,29 @@ def renew_link_handler(token: str):
         elif '10-User Pro' in license.plan_name:
              base_plan_key = '10user'
         # else it remains 'individual'
-
         
-        # Look up price info for the monthly/annual equivalent of the base plan
-        monthly_plan_key = f'{base_plan_key}_monthly' if base_plan_key != 'individual' else 'individual'
-        annual_plan_key = f'{base_plan_key}_annual' if base_plan_key != 'individual' else 'individual_annual'
+        # BUGFIX: Properly construct plan keys for both monthly and annual
+        if base_plan_key == 'individual':
+            monthly_plan_key = 'individual'
+            annual_plan_key = 'individual_annual'
+        else:
+            monthly_plan_key = f'{base_plan_key}_monthly'
+            annual_plan_key = f'{base_plan_key}_annual'
         
-        monthly_plan = PLANS.get(monthly_plan_key, PLANS['individual'])
-        annual_plan = PLANS.get(annual_plan_key, PLANS[monthly_plan_key]) # Fallback for safety
+        # Look up the actual plan details from PLANS dict
+        monthly_plan = PLANS.get(monthly_plan_key)
+        annual_plan = PLANS.get(annual_plan_key)
+        
+        # Safety check - if plans don't exist, use fallback
+        if not monthly_plan or not annual_plan:
+            logging.error(f"Plan keys not found: {monthly_plan_key}, {annual_plan_key}")
+            return "<p>❌ Error: Invalid plan configuration. Please contact support.</p>", 500
         
         # Use the prices from the PLANS structure
         price_monthly = monthly_plan['price']
         price_annual = annual_plan['price']
         
-        # Mocking the discounted display price for the frontend (reverse calculation)
+        # Calculate display prices
         monthly_display_price = price_monthly
         annual_display_price_per_month = price_annual / 12 
         
@@ -1286,7 +1295,7 @@ def renew_link_handler(token: str):
             'phone': phone,
             'plan_name': license.plan_name,
             'expired_at': expiry_dt_ist.strftime('%I:%M %p, %b %d, %Y') if expiry_dt_ist else 'N/A (Perpetual)',
-            'base_plan': base_plan_key, # e.g., '5user'
+            'base_plan': base_plan_key, # e.g., 'individual', '5user', '10user'
             'price_monthly': monthly_display_price,
             'price_annual': price_annual, # Annual total price
             'monthly_per_month_display': monthly_display_price,
@@ -1303,6 +1312,7 @@ def renew_link_handler(token: str):
         
     except Exception as e:
         logging.error(f"Error handling renewal link for {phone}: {e}")
+        logging.error(traceback.format_exc())
         return "<p>❌ An internal error occurred while processing your renewal link.</p>", 500
     finally:
         local_session.close()
