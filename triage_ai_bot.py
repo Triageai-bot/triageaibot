@@ -698,12 +698,14 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         
         payment_session_id = result.get("payment_session_id")
         
-        # Use the payment_session_id method (most reliable for hosted checkout)
+        # Cashfree Hosted Checkout URL format (correct as of API version 2023-08-01)
         if payment_session_id:
             if CASHFREE_ENV == "TEST":
-                payment_link = f"https://payments-test.cashfree.com/order/{payment_session_id}"
+                # For sandbox/test environment
+                payment_link = f"https://sandbox.cashfree.com/pg/view/order?order_id={order_id}"
             else:
-                payment_link = f"https://payments.cashfree.com/order/{payment_session_id}"
+                # For production environment
+                payment_link = f"https://www.cashfree.com/checkout/post/submit?order_id={order_id}"
         else:
             payment_link = None
             logging.error("No payment_session_id received from Cashfree")
