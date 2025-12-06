@@ -666,7 +666,7 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         headers = {
             "x-client-id": CASHFREE_APP_ID,
             "x-client-secret": CASHFREE_SECRET_KEY,
-            "x-api-version": "2023-08-01",   # or "2025-01-01" if enabled on your account
+            "x-api-version": "2025-01-01",   # or "2025-01-01" if enabled on your account
             "Content-Type": "application/json",
         }
 
