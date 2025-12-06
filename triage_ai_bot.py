@@ -700,9 +700,9 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         payment_session_id = result.get("payment_session_id")
         if payment_session_id:
             if CASHFREE_ENV == "TEST":
-                payment_link = f"https://sandbox.cashfree.com/pg/view/{payment_session_id}"
+                payment_link = f"https://sandbox.cashfree.com/pg/view/order/{payment_session_id}"
             else:
-                payment_link = f"https://payments.cashfree.com/order/{payment_session_id}"
+                payment_link = f"https://payments.cashfree.com/pay/{payment_session_id}"
         else:
             payment_link = None
         
