@@ -526,19 +526,16 @@
         }
 
         async function simulateRenewalPayment() {
-            document.getElementById('renewBtn').disabled = true;
-            document.getElementById('renewBtn').textContent = 'Processing Payment...';
-
-            alert("Simulating successful payment for renewal...");
+            const renewBtn = document.getElementById('renewBtn');
+            renewBtn.disabled = true;
+            renewBtn.textContent = 'Redirecting to Payment Gateway...';
             
             // Determine the backend key for the chosen duration
             let backendKey;
             
             if (renewalState.basePlan === 'individual') {
-                 // FIX: Individual plan must use 'individual_annual' for annual, and 'individual' for monthly
                  backendKey = renewalState.duration === 'monthly' ? 'individual' : 'individual_annual';
             } else {
-                 // Team plans use the _monthly/_annual suffix format
                  backendKey = renewalState.basePlan + (renewalState.duration === 'monthly' ? '_monthly' : '_annual');
             }
             
@@ -556,16 +553,18 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    document.getElementById('successModal').style.display = 'block';
+                    // Redirect to the payment gateway's hosted page
+                    window.location.href = result.payment_link;
                 } else {
                     alert('❌ Renewal Failed: ' + result.message);
+                    renewBtn.disabled = false;
+                    renewBtn.textContent = 'Proceed to Payment: ' + document.getElementById('paymentSummary').textContent;
                 }
             } catch (error) {
                 console.error('Error:', error);
                 alert('An unexpected error occurred during renewal purchase.');
-            } finally {
-                document.getElementById('renewBtn').disabled = false;
-                document.getElementById('renewBtn').textContent = 'Proceed to Payment: ' + document.getElementById('paymentSummary').textContent;
+                renewBtn.disabled = false;
+                renewBtn.textContent = 'Proceed to Payment: ' + document.getElementById('paymentSummary').textContent;
             }
         }
 

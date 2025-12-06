@@ -1599,7 +1599,7 @@ def create_report_pdf(user_id: str, df: pd.DataFrame, filters: Dict[str, Any]) -
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-        ('GRID', (0, 0), (-1, 0), 0.5, colors.grey),
+        ('GRID', (0, 0), (0, 0), 0.5, colors.grey),
     ]))
 
     story.append(data_table)
@@ -2040,13 +2040,18 @@ def payment_callback():
              logging.error(f"Callback received for unknown order: {order_id}")
              return render_template('payment_failed.html', order_id=order_id, message="Order not found in system."), 404
              
+        # Check if already processed (either by webhook or previous callback)
+        if payment_order.status == "SUCCESS":
+             # Already processed (safe due to webhook/callback race condition)
+             return render_template('payment_success.html', order_id=order_id)
+        
         # Verify payment status with Cashfree
         payments_response = get_cashfree_order_payments(order_id)
         
         if not payments_response:
             return render_template('payment_failed.html', 
                                  order_id=order_id, 
-                                 message="Unable to verify payment status"), 500
+                                 message="Unable to verify payment status. Please check your WhatsApp for confirmation or contact support."), 500
         
         # Check if any payment is successful
         successful_payment = None
@@ -2057,7 +2062,7 @@ def payment_callback():
                 successful_payment = payment
                 break
         
-        if successful_payment and payment_order.status == "PENDING":
+        if successful_payment:
             # Update payment order status
             payment_order.status = "SUCCESS"
             web_session.commit()
@@ -2078,21 +2083,17 @@ def payment_callback():
                                      order_id=order_id, 
                                      message="Payment confirmed but license activation failed. Contact support.")
         
-        elif payment_order.status == "SUCCESS":
-            # Already processed (safe due to webhook/callback race condition)
-             return render_template('payment_success.html', order_id=order_id, message="Payment already processed."), 200
-             
         else:
              # Payment failure confirmed by Cashfree or status remains PENDING/FAILED
              if payment_order.status == "PENDING":
                  payment_order.status = "FAILED"
                  web_session.commit()
-             return render_template('payment_failed.html', order_id=order_id, message="Payment was not successful or was canceled."), 400
+             return render_template('payment_failed.html', order_id=order_id, message="Payment was not successful or was canceled. Please try again."), 400
 
     except Exception as e:
         logging.error(f"Payment callback error for {order_id}: {e}")
         logging.error(traceback.format_exc())
-        return render_template('payment_failed.html', order_id=order_id, message="Payment processing error."), 500
+        return render_template('payment_failed.html', order_id=order_id, message="Payment processing error. Contact support with this Order ID."), 500
     finally:
         web_session.close()
 

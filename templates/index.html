@@ -341,6 +341,12 @@
             letter-spacing: 1px;
         }
 
+        .about-image {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
+
         .partners-section {
             padding: 80px 2rem;
             background: white;
@@ -1426,10 +1432,10 @@
                 </div>
                 
                 <p style="font-size: 0.9em; color: #a0aec0; text-align: center; margin-bottom: 20px;">
-                    (Simulation mode - No actual payment will be processed)
+                    (The payment gateway will open in a new tab/window)
                 </p>
                 
-                <button class="btn-primary" onclick="simulatePaymentSuccess()" id="payNowBtn" style="width: 100%;">Complete Payment (Demo)</button>
+                <button class="btn-primary" onclick="simulatePaymentSuccess()" id="payNowBtn" style="width: 100%;">Proceed to Payment</button>
             </div>
         </div>
     </div>
@@ -1710,7 +1716,7 @@
         async function simulatePaymentSuccess() {
             const payBtn = document.getElementById('payNowBtn');
             payBtn.disabled = true;
-            payBtn.textContent = 'Processing Payment...';
+            payBtn.textContent = 'Redirecting to Payment Gateway...';
 
             try {
                 const response = await fetch('/api/purchase', {
@@ -1725,18 +1731,18 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    alert('🎉 Payment Success! License Activated. Check your WhatsApp for the welcome message.');
-                    closeModal('paymentModal');
-                    window.location.href = '/';
+                    // Redirect to the payment gateway's hosted page
+                    window.location.href = result.payment_link;
                 } else {
-                    alert('❌ License Activation Failed: ' + result.message);
+                    alert('❌ Purchase Failed: ' + result.message);
+                    payBtn.disabled = false;
+                    payBtn.textContent = 'Proceed to Payment';
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('An unexpected error occurred after payment.');
-            } finally {
+                alert('An unexpected error occurred before payment.');
                 payBtn.disabled = false;
-                payBtn.textContent = 'Complete Payment (Demo)';
+                payBtn.textContent = 'Proceed to Payment';
             }
         }
 
