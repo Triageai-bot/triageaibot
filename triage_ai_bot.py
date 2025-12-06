@@ -84,7 +84,7 @@ MYSQL_CREDS = {
 # --- Cashfree Configuration ---
 CASHFREE_APP_ID = os.getenv("CASHFREE_APP_ID")
 CASHFREE_SECRET_KEY = os.getenv("CASHFREE_SECRET_KEY")
-CASHFREE_ENV = os.getenv("CASHFREE_ENV", "PROD")  # TEST or PROD
+CASHFREE_ENV = os.getenv("CASHFREE_ENV", "TEST")  # TEST or PROD
 
 # Cashfree API URLs
 CASHFREE_BASE_URL = "https://sandbox.cashfree.com/pg" if CASHFREE_ENV == "TEST" else "https://api.cashfree.com/pg"
@@ -666,7 +666,7 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         headers = {
             "x-client-id": CASHFREE_APP_ID,
             "x-client-secret": CASHFREE_SECRET_KEY,
-            "x-api-version": "2022-09-01",   # or "2025-01-01" if enabled on your account
+            "x-api-version": "2025-01-01",   # or "2025-01-01" if enabled on your account
             "Content-Type": "application/json",
         }
 
