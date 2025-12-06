@@ -1803,7 +1803,7 @@ def api_renewal_purchase():
             return jsonify({"status": "error", "message": "Profile not found"}), 404
             
         # Generate unique order ID for renewal
-        order_id = f"RENEW_{phone}_{int(time.time())}"
+        order_id = f"RENEW{phone}{int(time.time())}"
         amount = plan_details['price']                
 
         # Create payment order in database
@@ -1984,7 +1984,7 @@ def api_purchase():
              return jsonify({"status": "error", "message": "You already have an active admin account. Use /renew for renewal."}), 409
         
         # Generate unique order ID
-        order_id = f"PURCHASE_{phone}_{int(time.time())}"
+        order_id = f"PURCHASE{phone}{int(time.time())}"
         amount = plan_details['price']                
 
         # Create payment order in database
