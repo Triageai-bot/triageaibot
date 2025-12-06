@@ -14,9 +14,11 @@ import uuid
 import time
 import traceback
 import random
+import hmac
+import base64
 
 # --- New Imports for Web Server ---
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 from sqlalchemy.exc import IntegrityError
 from flask_cors import CORS
 
@@ -78,6 +80,14 @@ MYSQL_CREDS = {
     'password': 'RoadE@202406',
     'database': 'hushh_pr_bot',
 }
+
+# --- Cashfree Configuration ---
+CASHFREE_APP_ID = os.getenv("CASHFREE_APP_ID")
+CASHFREE_SECRET_KEY = os.getenv("CASHFREE_SECRET_KEY")
+CASHFREE_ENV = os.getenv("CASHFREE_ENV", "TEST")  # TEST or PROD
+
+# Cashfree API URLs
+CASHFREE_BASE_URL = "https://sandbox.cashfree.com/pg" if CASHFREE_ENV == "TEST" else "https://api.cashfree.com/pg"
 
 # --- TIMEZONE FIXES ---
 TIMEZONE = pytz.timezone('Asia/Kolkata')
@@ -229,6 +239,20 @@ class UserProfile(Base):
     billing_address = Column(String(500))
     gst_number = Column(String(50))
     is_registered = Column(Boolean, default=False)
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+    id = Column(Integer, primary_key=True)
+    order_id = Column(String(255), unique=True, index=True)
+    cf_order_id = Column(String(255))  # Cashfree's internal order ID
+    phone = Column(String(255), index=True)
+    plan_key = Column(String(50))
+    amount = Column(Integer)
+    status = Column(String(50), default="PENDING")  # PENDING, SUCCESS, FAILED, CANCELLED
+    payment_session_id = Column(String(255))
+    is_renewal = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 Base.metadata.create_all(engine)
 
@@ -612,10 +636,210 @@ def check_duplicate(phone: str, user_id: str):
     finally:
         local_session.close()
 
+def _generate_cashfree_signature(timestamp: str, raw_body: str) -> str:
+    """Generate signature for Cashfree webhook verification"""
+    signing_string = f"{timestamp}{raw_body}"
+    signature = base64.b64encode(
+        hmac.new(
+            CASHFREE_SECRET_KEY.encode('utf-8'),
+            signing_string.encode('utf-8'),
+            hashlib.sha256
+        ).digest()
+    ).decode('utf-8')
+    return signature
+
+def verify_cashfree_webhook_signature(timestamp: str, raw_body: str, received_signature: str) -> bool:
+    """Verify Cashfree webhook signature"""
+    expected_signature = _generate_cashfree_signature(timestamp, raw_body)
+    return hmac.compare_digest(expected_signature, received_signature)
+
+def create_cashfree_order(amount: float, customer_phone: str, customer_name: str, customer_email: str, order_id: str):
+    """Creates a Cashfree payment order using REST API"""
+    if not CASHFREE_APP_ID or not CASHFREE_SECRET_KEY:
+        logging.error("Cashfree credentials not configured")
+        return None
+        
+    try:
+        url = f"{CASHFREE_BASE_URL}/orders"
+        
+        headers = {
+            "x-client-id": CASHFREE_APP_ID,
+            "x-client-secret": CASHFREE_SECRET_KEY,
+            "x-api-version": "2023-08-01",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "order_id": order_id,
+            "order_amount": float(amount),
+            "order_currency": "INR",
+            "customer_details": {
+                "customer_id": customer_phone,
+                "customer_phone": customer_phone,
+                "customer_name": customer_name,
+                "customer_email": customer_email
+            },
+            "order_meta": {
+                "return_url": f"https://triageai.online/payment/callback?order_id={order_id}",
+                "notify_url": f"https://triageai.online/webhook/cashfree"
+            }
+        }
+        
+        logging.info(f"Creating Cashfree order: {order_id} for amount: {amount}")
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        logging.info(f"Cashfree API response status: {response.status_code}")
+        logging.info(f"Cashfree API response body: {response.text}")
+        
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        return {
+            "payment_session_id": result.get("payment_session_id"),
+            "order_id": result.get("order_id"),
+            "payment_link": result.get("payment_link"),
+            "cf_order_id": result.get("cf_order_id")
+        }
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Cashfree order creation failed: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            logging.error(f"Response: {e.response.text}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error in Cashfree order creation: {e}")
+        return None
+
+def get_cashfree_order_payments(order_id: str):
+    """Fetch payment details for an order from Cashfree using REST API"""
+    if not CASHFREE_APP_ID or not CASHFREE_SECRET_KEY:
+        logging.error("Cashfree credentials not configured")
+        return None
+
+    try:
+        url = f"{CASHFREE_BASE_URL}/orders/{order_id}/payments"
+        
+        headers = {
+            "x-client-id": CASHFREE_APP_ID,
+            "x-client-secret": CASHFREE_SECRET_KEY,
+            "x-api-version": "2023-08-01"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except Exception as e:
+        logging.error(f"Failed to fetch Cashfree payments for order {order_id}: {e}")
+        return None
+
+def _activate_license_after_payment(phone: str, plan_key: str, web_session, is_renewal: bool = False):
+    """Activates license after successful payment, handling both new purchase and renewal."""
+    try:
+        plan_details = PLANS.get(plan_key)
+        if not plan_details:
+            logging.error(f"Invalid plan key: {plan_key}")
+            return False
+        
+        # Determine license details
+        expiry_date = datetime.utcnow() + plan_details['duration']
+        
+        base_label = plan_details['label']
+        if plan_key == 'individual_annual' or 'annual' in plan_key:
+            duration_suffix = "Annual (Discounted)"
+        elif plan_key == 'individual' or 'monthly' in plan_key:
+            duration_suffix = "Monthly"
+        else:
+            duration_suffix = ""
+            
+        plan_label = f"{base_label} {duration_suffix}".strip()
+
+        profile = web_session.query(UserProfile).filter(UserProfile.phone == phone).first()
+        company_name = profile.company_name if profile and profile.company_name else f"TriageAI Company {phone}"
+
+        existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
+        
+        # Check if this is a renewal (Existing Admin with a Company)
+        is_renewal_logic = existing_agent and existing_agent.is_admin and existing_agent.company_id
+
+        if is_renewal_logic:
+            # --- RENEWAL CASE ---
+            company = web_session.query(Company).get(existing_agent.company_id)
+            license = company.license
+            new_key = license.key # Keep the old key for renewal
+
+            if license:
+                start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
+                license.expires_at = start_from + plan_details['duration']
+                license.is_active = True
+                license.plan_name = plan_label
+                license.agent_limit = plan_details['agents']
+                logging.info(f"✅ Renewal success. License {license.key} extended for Admin {phone}.")
+                
+                # Send renewal specific message
+                threading.Thread(
+                    target=_send_admin_renewal_message_sync,
+                    args=(phone, plan_label, license.expires_at)
+                ).start()
+            
+        else:
+            # --- NEW PURCHASE CASE ---
+            new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]
+
+            company = web_session.query(Company).filter(Company.admin_user_id == phone).first()
+            if not company:
+                company = Company(admin_user_id=phone, name=company_name)
+                web_session.add(company)
+                web_session.flush() # Get company.id
+
+            license = License(
+                company_id=company.id,
+                key=new_key,
+                plan_name=plan_label,
+                agent_limit=plan_details['agents'],
+                is_active=True,
+                expires_at=expiry_date
+            )
+            web_session.add(license)
+
+            if not existing_agent:
+                agent = Agent(user_id=phone)
+                web_session.add(agent)
+            else:
+                agent = existing_agent
+
+            agent.company_id = company.id
+            agent.is_admin = True
+            
+            logging.info(f"✅ Purchase success. License {new_key} activated for Admin {phone}.")
+
+            # Send welcome message
+            threading.Thread(
+                target=_send_admin_welcome_message_sync_fixed,
+                args=(phone, plan_label, new_key, expiry_date)
+            ).start()
+        
+        web_session.commit()
+        # Clear OTP state after successful payment
+        if phone in OTP_STORE:
+             del OTP_STORE[phone]
+             
+        return True
+
+    except Exception as e:
+        logging.error(f"License activation error: {e}")
+        logging.error(traceback.format_exc())
+        web_session.rollback()
+        return False
+
 
 # ==============================
 # 4. BUTTON MENU BUILDERS
 # ==============================
+# ... (All show_..._menu functions are unchanged)
 
 def show_main_menu(user_id: str):
     """Displays the main menu with buttons."""
@@ -1443,7 +1667,7 @@ def format_pipeline_text(user_id: str, scope: str = 'personal') -> str:
 @APP.route('/')
 def pricing_page():
     """Renders the single-page pricing and signup HTML from a template."""
-    WEBSITE_URL = "https://triageai.online/"
+    WEBSITE_URL = "https://triageai.online/" # Your domain
     return render_template(
         'index.html',
         web_auth_token=WEB_AUTH_TOKEN,
@@ -1531,7 +1755,7 @@ def renew_link_handler(token: str):
 
 @APP.route('/api/renewal_purchase', methods=['POST'])
 def api_renewal_purchase():
-    """Handles mock payment success for license renewal."""
+    """Handles Cashfree order creation for license renewal."""
     auth_header = request.headers.get('Authorization')
     if auth_header != f'Bearer {WEB_AUTH_TOKEN}':
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
@@ -1556,51 +1780,64 @@ def api_renewal_purchase():
         return jsonify({"status": "error", "message": "Invalid plan key"}), 400
 
     web_session = Session()
-    new_expiry_date = None 
-    plan_label = ""
     try:
         agent = web_session.query(Agent).filter(Agent.user_id == phone, Agent.is_admin == True).first()
         if not agent or not agent.company_id:
             return jsonify({"status": "error", "message": "User not a valid Admin."}), 403
-            
-        company = web_session.query(Company).get(agent.company_id)
-        license = company.license
         
-        if not license:
-            return jsonify({"status": "error", "message": "No license found for this company."}), 404
+        profile = web_session.query(UserProfile).filter(UserProfile.phone == phone).first()
+        if not profile:
+            return jsonify({"status": "error", "message": "Profile not found"}), 404
+            
+        # Generate unique order ID for renewal
+        order_id = f"RENEW_{phone}_{int(time.time())}"
+        amount = plan_details['price']                
 
-        start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
-        new_expiry_date = start_from + plan_details['duration']
-        
-        base_label = plan_details['label']
-        if plan_key == 'individual_annual' or 'annual' in plan_key:
-            duration_suffix = "Annual (Discounted)"
-        elif plan_key == 'individual' or 'monthly' in plan_key:
-            duration_suffix = "Monthly"
-        else:
-            duration_suffix = ""
-            
-        plan_label = f"{base_label} {duration_suffix}".strip()
-        
-        license.expires_at = new_expiry_date
-        license.is_active = True
-        license.plan_name = plan_label
-        license.agent_limit = plan_details['agents'] 
-        
+        # Create payment order in database
+        payment_order = PaymentOrder(
+            order_id=order_id,
+            phone=phone,
+            plan_key=plan_key,
+            amount=amount,
+            status="PENDING",
+            is_renewal=True # Mark as renewal
+        )
+        web_session.add(payment_order)
+        web_session.commit()                
+
+        # Create Cashfree order
+        cashfree_response = create_cashfree_order(
+            amount=amount,
+            customer_phone=phone,
+            customer_name=profile.name,
+            customer_email=profile.email,
+            order_id=order_id
+        )                
+
+        if not cashfree_response:
+            payment_order.status = "FAILED"
+            web_session.commit()
+            return jsonify({"status": "error", "message": "Payment gateway error"}), 500                
+
+        # Update payment order with Cashfree details
+        payment_order.payment_session_id = cashfree_response['payment_session_id']
+        payment_order.cf_order_id = cashfree_response.get('cf_order_id')
         web_session.commit()
-        
-        threading.Thread(
-            target=_send_admin_renewal_message_sync,
-            args=(phone, plan_label, new_expiry_date)
-        ).start()
-        
-        if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
 
-        return jsonify({"status": "success", "message": "Renewal successful. License updated."}), 200
+        # Delete the single-use renewal token to prevent abuse
+        if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
+        
+        return jsonify({
+            "status": "success",
+            "payment_link": cashfree_response['payment_link'],
+            "order_id": order_id,
+            "payment_session_id": cashfree_response['payment_session_id']
+        }), 200
 
     except Exception as e:
         web_session.rollback()
-        logging.error(f"Error processing renewal purchase: {e}")
+        logging.error(f"Error creating renewal payment order: {e}")
+        logging.error(traceback.format_exc())
         return jsonify({"status": "error", "message": "Internal server error."}), 500
     finally:
         web_session.close()
@@ -1708,123 +1945,235 @@ def api_billing():
 
 @APP.route('/api/purchase', methods=['POST'])
 def api_purchase():
-    """Step 4: Mock payment success -> License creation and activation."""
+    """Step 4: Create Cashfree order and return payment link for a new license."""
     auth_header = request.headers.get('Authorization')
     if auth_header != f'Bearer {WEB_AUTH_TOKEN}':
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
-
+    
     data = request.json
     plan_key = data.get('plan')
     phone = _sanitize_wa_id(data.get('phone', ''))
-
+    
     plan_details = PLANS.get(plan_key)
-
+    
     if not plan_details:
         return jsonify({"status": "error", "message": "Invalid plan key"}), 400
-
+    
     web_session = Session()
-    new_key = ""
-    expiry_date = None
-    plan_label = ""
-
     try:
         profile = web_session.query(UserProfile).filter(UserProfile.phone == phone).first()
         if not profile or not profile.is_registered:
-             return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
-
-        expiry_date = datetime.utcnow() + plan_details['duration'] 
+            return jsonify({"status": "error", "message": "Profile not registered/verified."}), 403
         
-        base_label = plan_details['label']
-        if plan_key == 'individual_annual' or 'annual' in plan_key:
-            duration_suffix = "Annual (Discounted)"
-        elif plan_key == 'individual' or 'monthly' in plan_key:
-            duration_suffix = "Monthly"
-        else:
-            duration_suffix = ""
-            
-        plan_label = f"{base_label} {duration_suffix}".strip()
-
+        # Check if user is already an Admin
         existing_agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
-        
         if existing_agent and existing_agent.is_admin:
-             return jsonify({"status": "error", "message": "License Activation Failed: User is already an Admin of a company."}), 409
+             return jsonify({"status": "error", "message": "You already have an active admin account. Use /renew for renewal."}), 409
         
-        new_key = str(uuid.uuid4()).upper().replace('-', '')[:16]
-        
-        company_name = profile.company_name if profile.company_name else "TriageAI Company"
-        
-        existing_company = web_session.query(Company).filter(Company.admin_user_id == phone).first()
-        
-        if existing_company:
-            license = existing_company.license
-            if license:
-                 start_from = license.expires_at if license.expires_at and license.expires_at > datetime.utcnow() else datetime.utcnow()
-                 license.expires_at = start_from + plan_details['duration']
-                 license.is_active = True
-                 license.plan_name = plan_label
-                 license.key = new_key
-                 license.agent_limit = plan_details['agents'] 
-                 
-                 logging.info(f"✅ Purchase success (Renewal). License {license.key} extended for Admin {phone}.")
-                 new_key = license.key
-            else:
-                 license = License(
-                    company_id=existing_company.id,
-                    key=new_key,
-                    plan_name=plan_label,
-                    agent_limit=plan_details['agents'],
-                    is_active=True,
-                    expires_at=expiry_date
-                )
-                 web_session.add(license)
-                 existing_company.name = company_name
-        
-        else:
-            company = Company(admin_user_id=phone, name=company_name)
-            web_session.add(company)
-            web_session.flush()
+        # Generate unique order ID
+        order_id = f"PURCHASE_{phone}_{int(time.time())}"
+        amount = plan_details['price']                
 
-            license = License(
-                company_id=company.id,
-                key=new_key,
-                plan_name=plan_label,
-                agent_limit=plan_details['agents'],
-                is_active=True,
-                expires_at=expiry_date
-            )
-            web_session.add(license)
-            
-            agent = web_session.query(Agent).filter(Agent.user_id == phone).first()
-            if not agent:
-                agent = Agent(user_id=phone)
-                web_session.add(agent)
+        # Create payment order in database
+        payment_order = PaymentOrder(
+            order_id=order_id,
+            phone=phone,
+            plan_key=plan_key,
+            amount=amount,
+            status="PENDING",
+            is_renewal=False
+        )
+        web_session.add(payment_order)
+        web_session.commit()                
 
-            agent.company_id = company.id
-            agent.is_admin = True
-            
-            logging.info(f"✅ Purchase success (New). License {new_key} activated for Admin {phone}.")
+        # Create Cashfree order
+        cashfree_response = create_cashfree_order(
+            amount=amount,
+            customer_phone=phone,
+            customer_name=profile.name,
+            customer_email=profile.email,
+            order_id=order_id
+        )                
 
+        if not cashfree_response:
+            payment_order.status = "FAILED"
+            web_session.commit()
+            return jsonify({"status": "error", "message": "Payment gateway error. Please try again."}), 500                
+
+        # Update payment order with Cashfree details
+        payment_order.payment_session_id = cashfree_response['payment_session_id']
+        payment_order.cf_order_id = cashfree_response.get('cf_order_id')
         web_session.commit()
-        if phone in OTP_STORE:
-             del OTP_STORE[phone]
+        
+        return jsonify({
+            "status": "success",
+            "payment_link": cashfree_response['payment_link'],
+            "order_id": order_id,
+            "payment_session_id": cashfree_response['payment_session_id']
+        }), 200
 
-        threading.Thread(
-            target=_send_admin_welcome_message_sync_fixed,
-            args=(phone, plan_label, new_key, expiry_date) 
-        ).start()
-
-        return jsonify({"status": "success", "message": "Purchase successful. License activated."}), 200
-
-    except IntegrityError as e:
-        web_session.rollback()
-        logging.error(f"Purchase failed due to integrity error: {e}")
-        return jsonify({"status": "error", "message": "User/Company already linked."}), 500
     except Exception as e:
         web_session.rollback()
-        logging.error(f"Error processing purchase: {e}")
+        logging.error(f"Error creating new purchase order: {e}")
+        logging.error(traceback.format_exc())
         return jsonify({"status": "error", "message": "Internal server error."}), 500
     finally:
         web_session.close()
+
+@APP.route('/payment/callback')
+def payment_callback():
+    """Handles redirect after user payment for both new and renewal purchases."""
+    order_id = request.args.get('order_id')
+    
+    if not order_id:
+        return render_template('payment_failed.html', 
+                             order_id="Unknown", 
+                             message="Invalid payment callback: Missing Order ID."), 400
+    
+    web_session = Session()
+    try:
+        payment_order = web_session.query(PaymentOrder).filter(
+            PaymentOrder.order_id == order_id
+        ).first()
+
+        if not payment_order:
+             logging.error(f"Callback received for unknown order: {order_id}")
+             return render_template('payment_failed.html', order_id=order_id, message="Order not found in system."), 404
+             
+        # Verify payment status with Cashfree
+        payments_response = get_cashfree_order_payments(order_id)
+        
+        if not payments_response:
+            return render_template('payment_failed.html', 
+                                 order_id=order_id, 
+                                 message="Unable to verify payment status"), 500
+        
+        # Check if any payment is successful
+        successful_payment = None
+        payments = payments_response.get('payments') if isinstance(payments_response.get('payments'), list) else []
+        
+        for payment in payments:
+            if payment.get('payment_status') == "SUCCESS":
+                successful_payment = payment
+                break
+        
+        if successful_payment and payment_order.status == "PENDING":
+            # Update payment order status
+            payment_order.status = "SUCCESS"
+            web_session.commit()
+            
+            # Activate license
+            success = _activate_license_after_payment(
+                payment_order.phone, 
+                payment_order.plan_key, 
+                web_session,
+                is_renewal=payment_order.is_renewal
+            )
+            
+            if success:
+                return render_template('payment_success.html', order_id=order_id)
+            else:
+                 # Should theoretically not happen if activation logic is sound, but handle just in case
+                return render_template('payment_failed.html', 
+                                     order_id=order_id, 
+                                     message="Payment confirmed but license activation failed. Contact support.")
+        
+        elif payment_order.status == "SUCCESS":
+            # Already processed (safe due to webhook/callback race condition)
+             return render_template('payment_success.html', order_id=order_id, message="Payment already processed."), 200
+             
+        else:
+             # Payment failure confirmed by Cashfree or status remains PENDING/FAILED
+             if payment_order.status == "PENDING":
+                 payment_order.status = "FAILED"
+                 web_session.commit()
+             return render_template('payment_failed.html', order_id=order_id, message="Payment was not successful or was canceled."), 400
+
+    except Exception as e:
+        logging.error(f"Payment callback error for {order_id}: {e}")
+        logging.error(traceback.format_exc())
+        return render_template('payment_failed.html', order_id=order_id, message="Payment processing error."), 500
+    finally:
+        web_session.close()
+
+@APP.route('/webhook/cashfree', methods=['POST'])
+def cashfree_webhook():
+    """Handles Cashfree payment notifications (Server-to-Server)"""
+    try:
+        # Get signature headers
+        timestamp = request.headers.get('x-webhook-timestamp')
+        signature = request.headers.get('x-webhook-signature')
+        
+        # Get raw body for signature verification
+        raw_body = request.get_data(as_text=True)
+
+        # Verify signature in production
+        if CASHFREE_ENV == "PROD":
+            if not timestamp or not signature or not verify_cashfree_webhook_signature(timestamp, raw_body, signature):
+                logging.error("Invalid Cashfree webhook signature or missing headers.")
+                return jsonify({"status": "error", "message": "Invalid signature"}), 403
+        
+        # Parse webhook data
+        data = request.json
+        
+        # event_type = data.get('type')
+        order_data = data.get('data', {}).get('order', {})
+        payment_data = data.get('data', {}).get('payment', {})
+        
+        order_id = order_data.get('order_id')
+        payment_status = payment_data.get('payment_status')
+        
+        logging.info(f"Cashfree webhook received: order={order_id}, status={payment_status}")
+        
+        if not order_id:
+            return jsonify({"status": "error", "message": "Missing order_id"}), 400
+        
+        web_session = Session()
+        try:
+            payment_order = web_session.query(PaymentOrder).filter(
+                PaymentOrder.order_id == order_id
+            ).first()
+            
+            if not payment_order:
+                logging.error(f"Order {order_id} not found in database")
+                return jsonify({"status": "error", "message": "Order not found"}), 404
+            
+            # Process successful payment
+            if payment_status == "SUCCESS" and payment_order.status == "PENDING":
+                payment_order.status = "SUCCESS"
+                web_session.commit()
+                
+                logging.info(f"Processing successful payment for order {order_id}")
+                
+                # Activate license
+                success = _activate_license_after_payment(
+                    payment_order.phone, 
+                    payment_order.plan_key, 
+                    web_session,
+                    is_renewal=payment_order.is_renewal
+                )
+                
+                if success:
+                    logging.info(f"License activated successfully for order {order_id}")
+                else:
+                    logging.error(f"License activation failed for order {order_id}")
+            
+            # Process failed payment
+            elif payment_status in ["FAILED", "CANCELLED", "USER_DROPPED"]:
+                if payment_order.status == "PENDING":
+                    payment_order.status = "FAILED"
+                    web_session.commit()
+                    logging.info(f"Payment marked as failed for order {order_id}")
+            
+            return jsonify({"status": "ok"}), 200
+            
+        finally:
+            web_session.close()
+            
+    except Exception as e:
+        logging.error(f"Webhook processing error: {e}")
+        logging.error(traceback.format_exc())
+        return jsonify({"status": "error", "message": "Internal error"}), 500
 
 @APP.route('/api/update/<int:lead_id>', methods=['POST'])
 def web_update_duplicate_endpoint(lead_id: int):
@@ -3470,6 +3819,9 @@ def clear_all_db_on_startup():
         
         local_session.query(UserProfile).delete()
         logging.warning("Cleared all UserProfile data (Web Signup State).")
+        
+        local_session.query(PaymentOrder).delete()
+        logging.warning("Cleared all PaymentOrder data (Cashfree Orders).")
 
         local_session.commit()
         logging.warning("--- DATABASE RESET COMPLETE ---")
@@ -3512,6 +3864,9 @@ def main_concurrent():
 
     if WEB_AUTH_TOKEN == "super_secret_web_key_123":
         print("⚠️ WARNING: WEB_AUTH_TOKEN is using default. Set it as an env var for security!")
+        
+    if not CASHFREE_APP_ID or not CASHFREE_SECRET_KEY:
+        print("⚠️ WARNING: Cashfree credentials not configured. Payment endpoints will fail.")
 
     # COMMENT OUT THIS LINE IN PRODUCTION - Only for testing
     # clear_all_db_on_startup()
