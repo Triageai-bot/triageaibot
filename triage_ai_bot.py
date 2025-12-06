@@ -696,10 +696,20 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         
         result = response.json()
         
+        # Construct the payment link manually using the payment_session_id
+        payment_session_id = result.get("payment_session_id")
+        if payment_session_id:
+            if CASHFREE_ENV == "TEST":
+                payment_link = f"https://sandbox.cashfree.com/pg/view/{payment_session_id}"
+            else:
+                payment_link = f"https://payments.cashfree.com/order/{payment_session_id}"
+        else:
+            payment_link = None
+        
         return {
-            "payment_session_id": result.get("payment_session_id"),
+            "payment_session_id": payment_session_id,
             "order_id": result.get("order_id"),
-            "payment_link": result.get("payment_link"),
+            "payment_link": payment_link,
             "cf_order_id": result.get("cf_order_id")
         }
         
