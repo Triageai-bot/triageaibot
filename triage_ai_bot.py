@@ -653,22 +653,23 @@ def verify_cashfree_webhook_signature(timestamp: str, raw_body: str, received_si
     expected_signature = _generate_cashfree_signature(timestamp, raw_body)
     return hmac.compare_digest(expected_signature, received_signature)
 
-def create_cashfree_order(amount: float, customer_phone: str, customer_name: str, customer_email: str, order_id: str):
-    """Creates a Cashfree payment order using REST API"""
+def create_cashfree_order(amount: float, customer_phone: str, customer_name: str,
+                          customer_email: str, order_id: str):
+    """Creates a Cashfree payment order using REST API (PG New)."""
     if not CASHFREE_APP_ID or not CASHFREE_SECRET_KEY:
         logging.error("Cashfree credentials not configured")
         return None
-        
+
     try:
         url = f"{CASHFREE_BASE_URL}/orders"
-        
+
         headers = {
             "x-client-id": CASHFREE_APP_ID,
             "x-client-secret": CASHFREE_SECRET_KEY,
-            "x-api-version": "2023-08-01",
-            "Content-Type": "application/json"
+            "x-api-version": "2023-08-01",   # or "2025-01-01" if enabled on your account
+            "Content-Type": "application/json",
         }
-        
+
         payload = {
             "order_id": order_id,
             "order_amount": float(amount),
@@ -677,47 +678,34 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
                 "customer_id": customer_phone,
                 "customer_phone": customer_phone,
                 "customer_name": customer_name,
-                "customer_email": customer_email
+                "customer_email": customer_email,
             },
             "order_meta": {
                 "return_url": f"https://triageai.online/payment/callback?order_id={order_id}",
-                "notify_url": f"https://triageai.online/webhook/cashfree"
-            }
+                "notify_url": "https://triageai.online/webhook/cashfree",
+            },
         }
-        
+
         logging.info(f"Creating Cashfree order: {order_id} for amount: {amount}")
-        
+
         response = requests.post(url, json=payload, headers=headers, timeout=10)
-        
         logging.info(f"Cashfree API response status: {response.status_code}")
         logging.info(f"Cashfree API response body: {response.text}")
-        
+
         response.raise_for_status()
-        
         result = response.json()
 
-        # Extract session ID for checkout
-        payment_session_id = result.get("payment_session_id")
-        if not payment_session_id:
-            logging.error("❌ Cashfree response missing payment_session_id")
-            return None
-
-        # Construct correct checkout link using payment_session_id (LATEST)
-        if CASHFREE_ENV == "TEST":
-            payment_link = f"https://payments-test.cashfree.com/pg/checkout?payment_session_id={payment_session_id}"
-        else:
-            payment_link = f"https://payments.cashfree.com/pg/checkout?payment_session_id={payment_session_id}"
-        
+        # NOTE: do NOT fabricate a payment_link URL here.
+        # We will use payment_session_id on the frontend to open checkout.
         return {
-            "payment_session_id": payment_session_id,
+            "payment_session_id": result.get("payment_session_id"),
             "order_id": result.get("order_id"),
-            "payment_link": payment_link,
-            "cf_order_id": result.get("cf_order_id")
+            "cf_order_id": result.get("cf_order_id"),
         }
-        
+
     except requests.exceptions.RequestException as e:
         logging.error(f"Cashfree order creation failed: {e}")
-        if hasattr(e, 'response') and e.response is not None:
+        if hasattr(e, "response") and e.response is not None:
             logging.error(f"Response: {e.response.text}")
         return None
     except Exception as e:
@@ -1687,6 +1675,24 @@ def pricing_page():
         website_url=WEBSITE_URL
     )
 
+@APP.route("/cashfree/redirect")
+def cashfree_redirect():
+    """Auto-POST the payment_session_id to Cashfree Checkout."""
+    session_id = request.args.get("session_id")
+    if not session_id:
+        return "Missing payment_session_id", 400
+
+    if CASHFREE_ENV == "TEST":
+        cf_url = "https://sandbox.cashfree.com/pg/view/sessions/checkout"
+    else:
+        cf_url = "https://api.cashfree.com/pg/view/sessions/checkout"
+
+    return render_template(
+        "cashfree_redirect.html",
+        cf_url=cf_url,
+        session_id=session_id,
+    )
+
 @APP.route('/renew_link/<token>')
 def renew_link_handler(token: str):
     """Handles the personalized renewal link from WhatsApp."""
@@ -1840,11 +1846,11 @@ def api_renewal_purchase():
         # Delete the single-use renewal token to prevent abuse
         if token in RENEWAL_TOKEN_STORE: del RENEWAL_TOKEN_STORE[token]
         
+        # NOTE: Updated to only return payment_session_id
         return jsonify({
             "status": "success",
-            "payment_link": cashfree_response['payment_link'],
             "order_id": order_id,
-            "payment_session_id": cashfree_response['payment_session_id']
+            "payment_session_id": cashfree_response["payment_session_id"],
         }), 200
 
     except Exception as e:
@@ -2018,11 +2024,11 @@ def api_purchase():
         payment_order.cf_order_id = cashfree_response.get('cf_order_id')
         web_session.commit()
         
+        # NOTE: Updated to only return payment_session_id
         return jsonify({
             "status": "success",
-            "payment_link": cashfree_response['payment_link'],
             "order_id": order_id,
-            "payment_session_id": cashfree_response['payment_session_id']
+            "payment_session_id": cashfree_response["payment_session_id"],
         }), 200
 
     except Exception as e:

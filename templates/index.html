@@ -1731,8 +1731,9 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    // Redirect to the payment gateway's hosted page
-                    window.location.href = result.payment_link;
+                    // Redirect using the intermediate route
+                    const sessionId = encodeURIComponent(result.payment_session_id);
+                    window.location.href = `/cashfree/redirect?session_id=${sessionId}`;
                 } else {
                     alert('❌ Purchase Failed: ' + result.message);
                     payBtn.disabled = false;

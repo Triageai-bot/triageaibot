@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting to Payment…</title>
+  </head>
+  <body>
+    <form id="cfRedirectForm" method="post" action="{{ cf_url }}">
+      <input type="hidden" name="payment_session_id" value="{{ session_id }}" />
+    </form>
+    <script>
+      document.getElementById('cfRedirectForm').submit();
+    </script>
+  </body>
+</html>
