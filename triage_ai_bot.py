@@ -699,10 +699,13 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         # Construct the payment link manually using the payment_session_id
         payment_session_id = result.get("payment_session_id")
         if payment_session_id:
+            # Cashfree hosted checkout URLs (as per official documentation)
             if CASHFREE_ENV == "TEST":
-                payment_link = f"https://sandbox.cashfree.com/pg/view/order/{payment_session_id}"
+                # Sandbox environment
+                payment_link = f"https://sandbox.cashfree.com/pg/view/orders?payment_session_id={payment_session_id}"
             else:
-                payment_link = f"https://payments.cashfree.com/pay/{payment_session_id}"
+                # Production environment
+                payment_link = f"https://www.cashfree.com/pg/view/orders?payment_session_id={payment_session_id}"
         else:
             payment_link = None
         
