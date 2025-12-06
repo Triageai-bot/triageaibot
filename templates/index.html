@@ -903,7 +903,7 @@
     <nav class="navbar" id="navbar">
         <div class="nav-container">
             <div class="logo">
-                <img src="images/triagelogo.png" alt="TriageAI Logo">
+                <img src="{{ url_for('static', filename='images/triagelogo.png') }}" alt="TriageAI Logo">
             </div>
             <ul class="nav-menu" id="navMenu">
                 <li><a href="#home">Home</a></li>
@@ -1269,7 +1269,7 @@
         <div class="footer-content">
             <div class="footer-brand">
     <a href="#home" class="footer-logo-container">
-        <img src="images/wlogo.png" alt="TriageAI Logo" class="footer-logo-img">
+        <img src="{{ url_for('static', filename='images/wlogo.png') }}" alt="TriageAI Logo" class="footer-logo-img">
     </a>
     <p>Transforming lead management through intelligent WhatsApp automation. Built by passionate IT professionals for businesses that want to close more deals.</p>
 </div>
