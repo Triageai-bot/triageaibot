@@ -84,7 +84,7 @@ MYSQL_CREDS = {
 # --- Cashfree Configuration ---
 CASHFREE_APP_ID = os.getenv("CASHFREE_APP_ID")
 CASHFREE_SECRET_KEY = os.getenv("CASHFREE_SECRET_KEY")
-CASHFREE_ENV = os.getenv("CASHFREE_ENV", "TEST")  # TEST or PROD
+CASHFREE_ENV = os.getenv("CASHFREE_ENV", "PROD")  # TEST or PROD
 
 # Cashfree API URLs
 CASHFREE_BASE_URL = "https://sandbox.cashfree.com/pg" if CASHFREE_ENV == "TEST" else "https://api.cashfree.com/pg"
