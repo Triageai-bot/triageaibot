@@ -695,17 +695,21 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
         response.raise_for_status()
         
         result = response.json()
-        
-        # Construct the correct payment link using order_id
+
+        # Extract session ID for checkout
+        payment_session_id = result.get("payment_session_id")
+        if not payment_session_id:
+            logging.error("❌ Cashfree response missing payment_session_id")
+            return None
+
+        # Construct correct checkout link using payment_session_id (LATEST)
         if CASHFREE_ENV == "TEST":
-            # Sandbox environment - Use the newer payments-test URL
-            payment_link = f"https://payments-test.cashfree.com/order/#{order_id}"
+            payment_link = f"https://payments-test.cashfree.com/pg/checkout?payment_session_id={payment_session_id}"
         else:
-            # Production environment
-            payment_link = f"https://payments.cashfree.com/order/#{order_id}"
+            payment_link = f"https://payments.cashfree.com/pg/checkout?payment_session_id={payment_session_id}"
         
         return {
-            "payment_session_id": result.get("payment_session_id"),
+            "payment_session_id": payment_session_id,
             "order_id": result.get("order_id"),
             "payment_link": payment_link,
             "cf_order_id": result.get("cf_order_id")
@@ -719,6 +723,7 @@ def create_cashfree_order(amount: float, customer_phone: str, customer_name: str
     except Exception as e:
         logging.error(f"Unexpected error in Cashfree order creation: {e}")
         return None
+
 
 def get_cashfree_order_payments(order_id: str):
     """Fetch payment details for an order from Cashfree using REST API"""
