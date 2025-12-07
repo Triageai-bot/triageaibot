@@ -3786,7 +3786,7 @@ def send_startup_message_sync():
     )
 
     if to_user_id == "919999999999":
-        to_user_id = os.getenv("TEST_ADMIN_PHONE", "918075204592")
+        to_user_id = os.getenv("TEST_ADMIN_PHONE", "917907603148")
 
     if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
         logging.error("Startup message skipped: WhatsApp credentials missing.")
