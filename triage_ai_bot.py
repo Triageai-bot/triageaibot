@@ -105,7 +105,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 # --- PAYMENT CONFIG ---
 PLANS = {
-    "individual": {"agents": 1, "price": 299, "duration": timedelta(days=30), "label": "Individual (1 Agent)"},
+    "individual": {"agents": 1, "price": 1, "duration": timedelta(days=30), "label": "Individual (1 Agent)"},
     "individual_annual": {"agents": 1, "price": 249 * 12, "duration": timedelta(days=365), "label": "Individual (1 Agent)"},
     "5user_monthly": {"agents": 5, "price": 1495, "duration": timedelta(days=30), "label": "5-User Team"},
     "5user_annual": {"agents": 5, "price": 1245 * 12, "duration": timedelta(days=365), "label": "5-User Team"},
